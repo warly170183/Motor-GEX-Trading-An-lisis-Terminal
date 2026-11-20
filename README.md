@@ -92,17 +92,21 @@ caches or screenshots with your account details.
   untested. See [Vol drift and DEX](#vol-drift-and-dex).
 - **Present mode** (key P): a larger layout for screen recording.
 
-## Crypto: BTC, ETH, SOL, TRX (Deribit + OKX)
+## Crypto: BTC, ETH, SOL, TRX (Deribit + OKX + Bybit)
 
 The same engine runs on crypto options, with no keys and no account. Open the app and it starts on BTC.
 
 | Coin | Deribit | OKX | Note |
 |---|---|---|---|
-| BTC, ETH | yes | yes | Both books are merged into one map. |
+| BTC, ETH | yes | yes | Books are merged into one map (plus Bybit, below). |
 | SOL, TRX | yes (USDC-margined) | no | Thin markets: few, illiquid options. The map says so; read the levels as rough. |
-| SUI, EGLD | no | no | Checked live: no venue lists options. The API answers 404 with a clear message; nothing is invented. |
+| SUI, EGLD | no | no | Checked live on Deribit and OKX: no options. Bybit is asked too and may list them. The API answers 404 with a clear message; nothing is invented. |
 
-- **Sources.** Deribit and OKX public REST (one request set each, run in parallel). Open interest is live, converted to
+- **Bybit (third venue).** Public REST, one request per coin. Written from Bybit's v5 documentation and unit-tested on a
+  payload in the documented shape, but **not yet verified against the live API** (Bybit blocks the cloud sandbox it was
+  built in). The map warns about this. Run `python tools/check_bybit.py` on your machine to confirm units (open interest
+  in coins, IV as a fraction). If Bybit is unreachable the map is built from the others with a "Partial map" warning.
+- **Sources.** Deribit, OKX and Bybit public REST (one request set each, run in parallel). Open interest is live, converted to
   coin units on every venue (OKX contracts x contract size), so strikes from both venues add up in one unit. IV is each
   venue's own mark IV. Spot is Deribit's index (OKX's if Deribit is down); a warning appears if the two differ by more
   than 0.5%.
@@ -118,7 +122,7 @@ The same engine runs on crypto options, with no keys and no account. Open the ap
   per-coin price decimals.
 - **Size reference.** Net GEX is compared with Deribit's perpetual daily dollar volume and 14-day ATR. One venue only, so
   shares of volume read larger than against all volume; the per typical day (1 ATR) view is the fairer comparison.
-- **What is not there yet.** Bybit, Binance and CME options are not included (named in the map's warnings). Vol drift,
+- **What is not there yet.** Binance and CME options are not included (named in the map's warnings). Vol drift,
   frozen captures, the percentile history and the Futures view are equity-only for now.
 - **Caveats.** The sign assumption (calls +, puts -) is weaker in crypto, where covered-call vaults and risk reversals are
   common: the unsigned view drops it. Not financial advice.

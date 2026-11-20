@@ -316,11 +316,13 @@ CRYPTO_COINS = {
 }
 CRYPTO_TICKERS = set(CRYPTO_COINS)
 NO_OPTIONS_COINS = {"SUI", "EGLD"}   # Checked live: no option listed on Deribit or OKX. Shown in search, 404 with a clear message.
-VENUES = ("deribit", "okx")      # Venues merged into one map, in spot-preference order (Deribit's index is the map's spot).
-VENUE_LABELS = {"deribit": "Deribit", "okx": "OKX"}
-VENUES_NOT_INCLUDED = ("Bybit", "CME")   # Named in the warning so nobody reads the map as the whole market.
+VENUES = ("deribit", "okx", "bybit")      # Venues merged into one map, in spot-preference order (Deribit's index is the map's spot).
+VENUE_LABELS = {"deribit": "Deribit", "okx": "OKX", "bybit": "Bybit"}
+VENUES_NOT_INCLUDED = ("Binance", "CME")   # Named in the warning so nobody reads the map as the whole market.
 DERIBIT_BASE = "https://www.deribit.com/api/v2/public"  # Public REST only: no keys, no websocket, no trading endpoint.
 OKX_BASE = "https://www.okx.com/api/v5"   # Public REST only: no keys, no websocket, no trading endpoint.
+BYBIT_BASE = "https://api.bybit.com/v5"   # Public REST only. Blocks some cloud IPs (HTTP 403): then the venue is reported unavailable.
+BYBIT_TIMEOUT_S = 20
 OKX_TIMEOUT_S = 20
 OKX_SETTLE_UTC = time(8, 0)      # OKX options also settle at 08:00 UTC on the expiry date.
 OKX_SPECS_TTL_S = 3600           # Contract size per family is static: fetched at most hourly.

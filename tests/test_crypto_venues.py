@@ -163,3 +163,59 @@ def test_btc_map_lists_both_venues_with_shares(client):
 def test_search_flags_coins_without_options(client):
     rows = {r["symbol"]: r for r in client.get("/api/search", params={"q": "SUI"}).json()}
     assert "no listed options" in rows["SUI"]["name"]
+
+
+# ---------------------------------------------------------------- Bybit (documented payload shape, not verified live)
+
+from gexlab.sources import bybit  # noqa: E402
+
+
+def _bybit_rows(spot=61000.0):
+    mk = lambda sym, oi, iv: {"symbol": sym, "markIv": iv, "openInterest": oi, "underlyingPrice": str(spot * 1.001),  # noqa: E731
+                              "indexPrice": str(spot), "bid1Price": "100", "ask1Price": "120"}
+    return [mk("BTC-25DEC26-60000-C-USDT", "12.5", "0.55"), mk("BTC-25DEC26-60000-P-USDT", "30", "0.57"),
+            mk("BTC-25DEC26-62000-C", "8", "0.5"), mk("BTC-25DEC26-61000-C-USDT", "5", "55"),   # IV 5500%: implausible
+            mk("garbage", "1", "0.5")]
+
+
+def test_bybit_symbols_with_and_without_settle_suffix():
+    assert bybit.parse_instrument("BTC-25DEC26-60000-C-USDT")[1:] == (date(2026, 12, 25), 60000.0, "call")
+    assert bybit.parse_instrument("SOL-3JAN27-80-P")[1] == date(2027, 1, 3)
+    with pytest.raises(ValueError):
+        bybit.parse_instrument("BTCUSDT")
+
+
+from datetime import date  # noqa: E402
+
+
+def test_bybit_parse_units_and_guards():
+    p = bybit.parse_part("BTC", _bybit_rows(), datetime(2026, 11, 20, tzinfo=UTC))
+    assert p.venue == "bybit" and len(p.contracts) == 4 and p.spot.price == 61000.0
+    c = next(c for c in p.contracts if c.symbol.endswith("60000-C-USDT"))
+    assert c.oi == 12.5 and c.multiplier == 1 and c.iv == 0.55 and c.venue == "bybit" and c.fwd == pytest.approx(61061.0)
+    assert next(c for c in p.contracts if "61000" in c.symbol).iv is None          # implausible IV dropped, not guessed
+    assert any("not been verified" in w for w in p.warnings) and any("implausible" in w for w in p.warnings)
+
+
+def test_bybit_empty_is_no_options():
+    with pytest.raises(NoOptions):
+        bybit.parse_part("SUI", [], datetime(2026, 11, 20, tzinfo=UTC))
+
+
+def test_three_venue_merge_and_bybit_down_degrades():
+    now = datetime(2026, 11, 20, tzinfo=UTC)
+    d, (f, onow) = _dpart("BTC"), _okx("BTC")
+    o, b = okx.parse_part("BTC", *f, onow), bybit.parse_part("BTC", _bybit_rows(d.spot.price), now)
+    ch = crypto.merge("BTC", now, [("bybit", b, None), ("okx", o, None), ("deribit", d, None)])
+    assert ch.feed == "deribit+okx+bybit" and [v["name"] for v in ch.venues] == ["deribit", "okx", "bybit"]
+    down = crypto.merge("BTC", now, [("deribit", d, None), ("okx", o, None), ("bybit", None, ("unavailable", "HTTP 403"))])
+    assert down.feed == "deribit+okx" and any("Partial map" in w and "Bybit" in w for w in down.warnings)
+
+
+def test_fetch_403_is_reported_as_unavailable_not_crash(monkeypatch):
+    def boom(*a, **k):
+        raise SourceError("GET failed with HTTP 403", status=403)
+    monkeypatch.setattr(bybit, "get_with_backoff", boom)
+    with pytest.raises(SourceError) as e:
+        bybit.fetch_part("BTC", datetime.now(UTC))
+    assert "country block" in str(e.value)

@@ -879,9 +879,9 @@ def search(q: str) -> list[dict]:
         return []
     crypto_rows = []
     for sym, c in config.CRYPTO_COINS.items():
-        lists = [config.VENUE_LABELS[v] for v in config.VENUES
+        lists = [config.VENUE_LABELS[v] for v in ("deribit", "okx")
                  if (c[v].get("family") if v == "okx" else c[v]["prefix"]) and not (sym in config.NO_OPTIONS_COINS)]
-        nm = f"{c['name']} options ({' + '.join(lists)})" if lists else f"{c['name']}: no listed options"
+        nm = f"{c['name']} options ({' + '.join(lists)})" if lists else f"{c['name']}: no listed options on Deribit or OKX"
         crypto_rows.append({"symbol": sym, "name": nm, "source": "deribit"})
     if config.is_demo():
         rows = crypto_rows + _fixture("search.json")

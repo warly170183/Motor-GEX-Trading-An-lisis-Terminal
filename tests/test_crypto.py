@@ -296,7 +296,7 @@ def test_map_btc_eth(client, t):
     assert mg["adv_usd"] and mg["per_atr"]["atr_pct"] and mg["pct_of_adv"] > 0
     lo, hi = m["spot"]["price"] * 0.8, m["spot"]["price"] * 1.2
     assert all(lo <= s["strike"] <= hi for s in m["strikes"])        # displayed band is +-20%
-    assert any("Venues included: Deribit + OKX" in w and "Bybit" in w for w in m["warnings"])
+    assert any("Venues included: Deribit + OKX" in w and "Binance" in w for w in m["warnings"])
 
 
 def test_lead_uses_crypto_precision(client):
