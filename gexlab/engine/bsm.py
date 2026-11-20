@@ -132,6 +132,38 @@ def rho(S, K, T, r, sigma, option_type: OptionType, q=0.0) -> float:
     return -K * T * math.exp(-r * T) * _N(-d2) / 100.0
 
 
+# -- Second-order Greeks (vanna, charm) -------------------------------------------
+# Formulas follow the standard closed forms (as used by gflows, EzOptions and OpenGEX) with q = 0.
+
+def vanna(S, K, T, r, sigma, q=0.0) -> float:
+    """dDelta/dSigma per 1.00 of volatility (not per point): -exp(-qT) n(d1) d2 / sigma. Same for calls and puts.
+    Multiply by 0.01 for the change in delta per one volatility point. Zero once expired."""
+    if T <= 0:
+        return 0.0
+    _validate(sigma)
+    d1, d2 = _d1_d2(S, K, T, r, sigma, q)
+    return -math.exp(-q * T) * _n(d1) * d2 / sigma
+
+
+def charm(S, K, T, r, sigma, option_type: OptionType, q=0.0) -> float:
+    """Delta decay per CALENDAR DAY: how much delta changes as one day passes (dDelta/dt / 365).
+
+    Closed form for q = 0 (the engine's setting): n(d1) * (2 r T - d2 sigma sqrt(T)) / (2 T sigma sqrt(T)) with the
+    sign flipped so it reads as the change over elapsed time. With r = 0 it is n(d1) d2 / (2 T) and equal for calls and
+    puts. For q != 0 the dividend term is added per option type. Zero once expired."""
+    if T <= 0:
+        return 0.0
+    _validate(sigma)
+    d1, d2 = _d1_d2(S, K, T, r, sigma, q)
+    sT = sigma * math.sqrt(T)
+    core = -math.exp(-q * T) * _n(d1) * (2.0 * (r - q) * T - d2 * sT) / (2.0 * T * sT)
+    if option_type == "call":
+        raw = q * math.exp(-q * T) * _N(d1) + core
+    else:
+        raw = -q * math.exp(-q * T) * _N(-d1) + core
+    return raw / 365.0
+
+
 def all_greeks(S, K, T, r, sigma, option_type: OptionType, q=0.0) -> dict:
     """Price + all Greeks in one dict."""
     return {

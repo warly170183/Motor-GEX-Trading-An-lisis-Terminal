@@ -1360,6 +1360,7 @@ function MethodBody({ m, ticker }: { m: GexMap | null; ticker: string }) {
       </section>
       <MagnitudeSection m={m} />
       <DexSection m={m} />
+      <StructureSection m={m} />
       <VolDriftSection m={m} />
       <section>
         <h3>Net GEX at hypothetical prices</h3>
@@ -1581,6 +1582,95 @@ function DexSection({ m }: { m: GexMap | null }) {
           <dd>
             {int(dx.contracts)} valid contracts of the selected expiries, open interest from {dayFull(dx.oi_date)}.
           </dd>
+        </dl>
+      )}
+    </section>
+  );
+}
+
+function StructureSection({ m }: { m: GexMap | null }) {
+  const st = m?.structure ?? null;
+  const pct1 = (v: number) => `${(v * 100).toFixed(1)}%`;
+  const lvl = (v: number | null | undefined) => (v == null || !m ? "none" : px(v, m.ticker));
+  return (
+    <section>
+      <h3>Structure (max pain, expected move, vanna, charm)</h3>
+      <div className="formula">
+        {"VEX = Vanna · 0.01 · OI · mult · S   (USD per +1 vol point)\n"}
+        <span className="c">{"CEX = Charm · OI · mult · S          (USD per day)\n"}</span>
+        <span className="c">{"1 sigma = F · ATM IV · sqrt(T)"}</span>
+      </div>
+      <p>{st?.method ?? "Second-order exposures and chain structure from the same open interest, IV and clock as GEX."}</p>
+      <p>{st?.caveat ?? "Display only, context and not a signal."}</p>
+      {st && st.available && (
+        <dl className="kv">
+          {st.vex_net_usd != null && (
+            <>
+              <dt>Net VEX</dt>
+              <dd>
+                {gex(st.vex_net_usd, { sign: true })} per +1 vol point ({gex(st.vex_abs_usd)} unsigned).
+              </dd>
+            </>
+          )}
+          {st.cex_net_usd_day != null && (
+            <>
+              <dt>Net CEX</dt>
+              <dd>
+                {gex(st.cex_net_usd_day, { sign: true })} per day ({gex(st.cex_abs_usd_day)} unsigned).
+              </dd>
+            </>
+          )}
+          {st.expected_move && (
+            <>
+              <dt>Expected move</dt>
+              <dd>
+                ±{lvl(st.expected_move.sigma_abs)} ({st.expected_move.sigma_pct.toFixed(2)}%), {lvl(st.expected_move.low)} to{" "}
+                {lvl(st.expected_move.high)}, from ATM IV {pct1(st.expected_move.iv)} on the {dayFull(st.expected_move.expiry)} expiry ({st.expected_move.days.toFixed(1)} days).
+              </dd>
+            </>
+          )}
+          {st.rr25 != null && (
+            <>
+              <dt>25-delta risk reversal</dt>
+              <dd>
+                {(st.rr25 * 100).toFixed(1)} vol points: {st.rr25 < 0 ? "puts richer than calls" : st.rr25 > 0 ? "calls richer than puts" : "even"}.
+              </dd>
+            </>
+          )}
+          {st.max_pain.length > 0 && (
+            <>
+              <dt>Max pain</dt>
+              <dd>
+                {st.max_pain
+                  .slice(0, 4)
+                  .map((r) => `${dayFull(r.expiry)} ${lvl(r.strike)} (${r.distance_pct > 0 ? "+" : ""}${r.distance_pct.toFixed(1)}%)`)
+                  .join("; ")}
+                .
+              </dd>
+            </>
+          )}
+          {st.pcr_oi != null && (
+            <>
+              <dt>Put/call (open interest)</dt>
+              <dd>
+                {st.pcr_oi.toFixed(2)} ({int(st.put_oi)} puts to {int(st.call_oi)} calls).
+              </dd>
+            </>
+          )}
+          {(st.gex_poc != null || st.oi_poc != null) && (
+            <>
+              <dt>Points of control</dt>
+              <dd>
+                Largest net |GEX| at {lvl(st.gex_poc)}; most open interest at {lvl(st.oi_poc)}.
+              </dd>
+            </>
+          )}
+          {st.cum_zero != null && (
+            <>
+              <dt>Cumulative zero</dt>
+              <dd>{lvl(st.cum_zero)}: the strike-ordered cumulative net GEX crosses zero here, a cruder check of the gamma flip.</dd>
+            </>
+          )}
         </dl>
       )}
     </section>

@@ -38,6 +38,17 @@ demo data, not live market data.
 **[I Built a Free Gamma Exposure (GEX) Map You Can Understand](https://youtu.be/okQVLf2s3GI)**: what GEX
 is and how traders use it, then the tool itself on demo data.
 
+## Structure and second-order exposures
+
+Shown in the map's drawer and as price lines on the Terminal chart. Display only: no capture gate and no guidance scenario reads them.
+
+- **VEX (vanna) and CEX (charm)**: dollars of dealer delta per +1 volatility point and per calendar day, with the same dealer-sign assumption, IV and clock as GEX.
+- **Max pain** per expiry (no open interest, no answer), **put/call ratio** on open interest, and the **points of control** (largest net |GEX|, most open interest).
+- **Expected move**: 1 sigma = F x ATM IV x sqrt(T) on the nearest expiry with a day or more left, and the **25-delta risk reversal** on that expiry.
+- **Cumulative-GEX zero cross**: a cruder cross-check of the swept gamma flip.
+
+The formulas are in `gexlab/engine/structure.py` and `gexlab/engine/bsm.py` (vanna and charm are tested against finite differences). `/api/map` returns them under `structure`.
+
 ## Privacy and your data
 
 Edge GEX Lab runs on your own computer. It needs no account, sends no telemetry, and the server

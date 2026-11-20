@@ -186,6 +186,33 @@ export interface VolDrift {
 }
 
 /** DEX: delta * OI * 100 * spot over the selected expiries. net = calls minus puts (put delta is negative), plus unsigned sides. */
+/** Chain structure and second-order exposures (display only). Absent from older payloads; null when it could not be built. */
+export interface Structure {
+  available: boolean;
+  /** USD of dealer delta per +1 volatility point, signed (dealers long calls, short puts). */
+  vex_net_usd: number | null;
+  vex_abs_usd: number | null;
+  /** USD of dealer delta lost per calendar day, signed. */
+  cex_net_usd_day: number | null;
+  cex_abs_usd_day: number | null;
+  contracts: number;
+  pcr_oi: number | null;
+  call_oi: number;
+  put_oi: number;
+  gex_poc: number | null;
+  oi_poc: number | null;
+  /** Cumulative-GEX zero cross: a cruder cross-check of the swept gamma flip. */
+  cum_zero: number | null;
+  max_pain: { expiry: string; strike: number; distance_pct: number; oi: number }[];
+  expected_move: { expiry: string; days: number; iv: number; sigma_abs: number; sigma_pct: number; low: number; high: number } | null;
+  /** IV of the 25-delta call minus IV of the 25-delta put, decimal; negative = puts richer. */
+  rr25: number | null;
+  rr25_expiry: string | null;
+  oi_date: string | null;
+  caveat: string;
+  method: string;
+}
+
 export interface Dex {
   available: boolean;
   reason: string | null;
@@ -260,6 +287,7 @@ export interface GexMap {
   /** null only when the block could not be built; absent from older payloads. */
   vol_drift?: VolDrift | null;
   dex?: Dex | null;
+  structure?: Structure | null;
   /** usable false: no valid contract within 10% of spot, so the levels are unavailable, not neutral or zero.
    *  reason "no_live_quotes": no bid, ask or IV anywhere in the selection (Cboe's first minutes after the open). */
   quotes?: { usable: boolean; reason: "no_live_quotes" | "no_usable_contracts" | null; live: number };

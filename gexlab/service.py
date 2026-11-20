@@ -13,6 +13,7 @@ import logging
 from gexlab import config, magnitude, store
 from gexlab.engine import dex as DX
 from gexlab.engine import gex as G
+from gexlab.engine import structure as ST
 from gexlab.engine import voldrift as VD
 from gexlab.engine.calendar import (NY, UTC, CryptoCalendar, TradingCalendar, crypto_expiry_kind, expiry_kind, iso_z,
                                     ny_today, settlement_dt, utc_now, utc_today, valuation_label)
@@ -485,6 +486,7 @@ def build_map(ticker: str, expiries: list[str] | None, signed: bool) -> dict:
                    "net_gex": call_tot + put_tot_out},
         "magnitude": _magnitude(ticker, chain, call_tot, put_tot, spot, cal, now),
         "dex": _dex(sel, spot, chain, quotes["usable"]),
+        "structure": _structure(sel, spot, chain, quotes["usable"]),
         "vol_drift": None if crypto else _vol_drift(ticker, chain, cal, now, market_open,
                                                     lv.regime if quotes["usable"] else None),
         "quotes": quotes,
@@ -582,6 +584,46 @@ def _dex(sel: list[Contract], spot: float, chain: Chain, usable: bool) -> dict |
             "contracts": d.contracts, "oi_date": chain.oi_date,
             "caveat": DEX_CAVEAT_CRYPTO if config.is_crypto(chain.ticker) else DEX_CAVEAT,
             "method": DEX_METHOD_CRYPTO if config.is_crypto(chain.ticker) else DEX_METHOD}
+
+
+STRUCTURE_CAVEAT = ("Display only, context and not a signal. VEX and CEX use the same dealer-sign assumption as GEX (dealers long "
+                    "calls, short puts), which open interest cannot confirm. Max pain, the put/call ratio and the points of "
+                    "control read open interest as it stands; the expected move and the 25-delta skew read implied volatility "
+                    "as quoted. None of these is tested against outcomes here.")
+STRUCTURE_METHOD = ("VEX = vanna x 0.01 x OI x multiplier x S: dollars of dealer delta per +1 volatility point. CEX = charm x OI x "
+                    "multiplier x S: dollars of dealer delta lost per calendar day. Both use Black-Scholes with r = q = 0 (crypto: "
+                    "Black-76 on each expiry's forward), the IV and the clock of that contract's GEX. Max pain = the strike "
+                    "where call and put holders together collect least at settlement; no open interest, no answer. Expected "
+                    "move = F x ATM IV x sqrt(T) (1 sigma) on the nearest expiry with a day or more left. 25-delta risk reversal "
+                    "= IV of the 25-delta call minus IV of the 25-delta put on that expiry; negative means puts are richer. "
+                    "Cumulative zero = per-strike net GEX summed from the lowest strike up, zero interpolated: a cruder "
+                    "cross-check of the swept gamma flip.")
+
+
+def _structure(sel: list[Contract], spot: float, chain: Chain, usable: bool) -> dict | None:
+    """Chain structure and second-order exposures of the selected expiries. Never takes the map down: a failure leaves `structure` null."""
+    try:
+        st = ST.compute(sel, spot)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("structure unavailable for %s: %s", chain.ticker, ex)
+        return None
+    em = st.expected_move
+    return {
+        "available": bool(usable and (st.contracts > 0 or st.max_pain)),
+        "vex_net_usd": st.vex_net, "vex_abs_usd": st.vex_abs,
+        "cex_net_usd_day": st.cex_net, "cex_abs_usd_day": st.cex_abs, "contracts": st.contracts,
+        "pcr_oi": None if st.pcr_oi is None else round(st.pcr_oi, 3),
+        "call_oi": st.call_oi, "put_oi": st.put_oi,
+        "gex_poc": st.gex_poc, "oi_poc": st.oi_poc, "cum_zero": None if st.cum_zero is None else round(st.cum_zero, 4),
+        "max_pain": [{"expiry": m.expiry.isoformat(), "strike": m.strike, "distance_pct": m.distance_pct, "oi": m.oi}
+                     for m in st.max_pain],
+        "expected_move": None if em is None else {
+            "expiry": em.expiry.isoformat(), "days": round(em.days, 2), "iv": round(em.iv, 4),
+            "sigma_abs": em.sigma_abs, "sigma_pct": round(em.sigma_pct, 2), "low": em.low, "high": em.high},
+        "rr25": None if st.rr25 is None else round(st.rr25, 4),
+        "rr25_expiry": st.rr25_expiry.isoformat() if st.rr25_expiry else None,
+        "oi_date": chain.oi_date, "caveat": STRUCTURE_CAVEAT, "method": STRUCTURE_METHOD,
+    }
 
 
 VOL_METHOD = ("At-the-money implied volatility of one expiry: the IVs of the two strikes that bracket spot, "
