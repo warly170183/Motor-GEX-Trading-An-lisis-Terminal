@@ -996,6 +996,8 @@ export async function mockFetch(path: string, init?: RequestInit): Promise<unkno
     }
     case "/api/history/flow":
       return { ticker: p.get("ticker") || "BTC", bar: p.get("bar") || "15m", rows: [], coverage: { snaps: 0, first_ts: null, last_ts: null }, method: "mock" };
+    case "/api/history/backfill":
+      return { running: false, done: 30, total: 30, current: null, error: null, finished: true, stored_bars: 48210, targets_days: { "5m": 14, "15m": 60, "1H": 365, "4H": 730, "1D": 1095 } };
     case "/api/history/snapshots":
       return { ticker: p.get("ticker") || "BTC", timestamps: [], recording: false };
     case "/api/update":

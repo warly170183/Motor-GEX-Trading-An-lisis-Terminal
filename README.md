@@ -335,3 +335,21 @@ no telemetry. If it is useful, fork it.
 ## License
 
 MIT. See [LICENSE](LICENSE). Charts use TradingView Lightweight Charts (Apache 2.0).
+
+## Local price history (automatic download)
+
+When the app starts live it downloads OKX swap candles for every crypto coin (BTC, ETH, SOL, TRX, SUI, EGLD) and keeps them in the app's SQLite file (table `ohlcv`):
+
+| Timeframe | Depth |
+|---|---|
+| 5m | 14 days |
+| 15m | 60 days |
+| 1H | 365 days |
+| 4H | 730 days |
+| 1D | 1095 days |
+
+- Runs in a background thread, about 8 minutes the first time; later starts only fetch what is missing, and it tops up hourly.
+- Only confirmed bars are stored. A young coin simply has a shorter series.
+- `/api/candles` serves local history behind the latest bars (limit up to 2000). `/api/history/backfill` reports progress; the Terminal screen shows it.
+- `GEXLAB_HISTORY=0` disables it, `GEXLAB_HISTORY_PACE_S` sets the pause between requests (0.15 s). Run it by hand with `python -m gexlab.ohlcv`.
+- This is price only. Options open interest has no public history, so the GEX history is what `gexlab.history` records from now on.

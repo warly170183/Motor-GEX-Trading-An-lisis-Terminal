@@ -667,6 +667,17 @@ export interface FlowHistory {
   method: string;
 }
 
+export interface Backfill {
+  running: boolean;
+  done: number;
+  total: number;
+  current: string | null;
+  error: string | null;
+  finished: boolean;
+  stored_bars: number;
+  targets_days: Record<string, number>;
+}
+
 export interface SnapshotList {
   ticker: string;
   timestamps: number[];

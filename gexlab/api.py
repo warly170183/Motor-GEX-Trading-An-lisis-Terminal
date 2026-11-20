@@ -16,7 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from gexlab import candles, config, history, service, update_check
+from gexlab import candles, config, history, ohlcv, service, update_check
 from gexlab.sources.base import SourceError
 
 log = logging.getLogger("gexlab.api")
@@ -25,9 +25,11 @@ log = logging.getLogger("gexlab.api")
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     update_check.start_background_check()      # at most once a day, silent offline, GEXLAB_NO_UPDATE_CHECK=1 skips it
+    ohlcv.start()                              # downloads price history for every coin, then tops it up hourly
     history.start_recorder()                   # crypto GEX snapshots every 5 min; GEXLAB_RECORD=0 turns it off
     yield
     history.stop_recorder()
+    ohlcv.stop()
 
 
 app = FastAPI(title="Edge GEX Lab", version=config.MODEL_VERSION, lifespan=_lifespan)
@@ -82,7 +84,7 @@ def expirations(ticker: str):
 
 
 @app.get("/api/candles")
-def get_candles(ticker: str, bar: str = "15m", limit: int = Query(300, ge=10, le=300)):
+def get_candles(ticker: str, bar: str = "15m", limit: int = Query(300, ge=10, le=2000)):
     """Price candles (OKX swap) for the Terminal screen. Crypto only."""
     try:
         return candles.get_candles(_ticker(ticker), bar, limit)
@@ -90,6 +92,12 @@ def get_candles(ticker: str, bar: str = "15m", limit: int = Query(300, ge=10, le
         if e.status == 400:
             raise HTTPException(400, str(e))
         raise _vendor_error(e)
+
+
+@app.get("/api/history/backfill")
+def history_backfill():
+    """Progress of the local price-history download (bars stored, current series, errors)."""
+    return ohlcv.status()
 
 
 @app.get("/api/history/flow")

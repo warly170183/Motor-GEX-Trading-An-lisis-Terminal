@@ -57,6 +57,8 @@ export default function Terminal({ ticker, onTicker }: Props) {
   const flow = useAsync(() => api.historyFlow(ticker, bar), [ticker, bar]);
   const snaps = useAsync(() => api.historySnapshots(ticker, 24), [ticker]);
   useEvery(flow.reload, 60_000);
+  const bf = useAsync(() => api.backfill(), []);
+  useEvery(bf.reload, bf.data?.running ? 5_000 : 60_000);
   useEvery(snaps.reload, 60_000);
   const [replay, setReplay] = useState(false);
   const [idx, setIdx] = useState(0);
@@ -123,6 +125,14 @@ export default function Terminal({ ticker, onTicker }: Props) {
           ))}
         </div>
       </div>
+
+      {bf.data && (bf.data.running || bf.data.stored_bars > 0) && (
+        <div className="term-sub" role="status">
+          {bf.data.running
+            ? `Downloading price history: ${bf.data.done}/${bf.data.total} series${bf.data.current ? ` (${bf.data.current})` : ""} · ${bf.data.stored_bars.toLocaleString()} bars stored locally`
+            : `Local price history: ${bf.data.stored_bars.toLocaleString()} bars stored${bf.data.error ? ` · last error: ${bf.data.error}` : ""}`}
+        </div>
+      )}
 
       <div className="term-replay">
         {!replay ? (
