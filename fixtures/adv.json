@@ -1,0 +1,58 @@
+{
+ "SPY": {
+  "adv_usd": 30000000000.0,
+  "sessions": 20,
+  "first": "2026-09-17",
+  "last": "2026-10-15",
+  "reason": null,
+  "note": "Synthetic fixture"
+ },
+ "QQQ": {
+  "adv_usd": 18000000000.0,
+  "sessions": 20,
+  "first": "2026-09-17",
+  "last": "2026-10-15",
+  "reason": null,
+  "note": "Synthetic fixture"
+ },
+ "NVDA": {
+  "adv_usd": 35000000000.0,
+  "sessions": 20,
+  "first": "2026-09-17",
+  "last": "2026-10-15",
+  "reason": null,
+  "note": "Synthetic fixture"
+ },
+ "BTC": {
+  "adv_usd": 1946715897.5,
+  "sessions": 20,
+  "first": "2026-10-31",
+  "last": "2026-11-19",
+  "reason": null,
+  "note": "Recorded Deribit snapshot (2026-11-20)"
+ },
+ "ETH": {
+  "adv_usd": 201220991.5,
+  "sessions": 20,
+  "first": "2026-10-31",
+  "last": "2026-11-19",
+  "reason": null,
+  "note": "Recorded Deribit snapshot (2026-11-20)"
+ },
+ "SOL": {
+  "adv_usd": 675749510.0681702,
+  "sessions": 20,
+  "first": "2026-10-31",
+  "last": "2026-11-19",
+  "reason": null,
+  "note": "Recorded Deribit snapshot (2026-11-20)"
+ },
+ "TRX": {
+  "adv_usd": 828467.385255,
+  "sessions": 20,
+  "first": "2026-10-31",
+  "last": "2026-11-19",
+  "reason": null,
+  "note": "Recorded Deribit snapshot (2026-11-20)"
+ }
+}

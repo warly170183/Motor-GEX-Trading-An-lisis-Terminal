@@ -1,0 +1,311 @@
+# Edge GEX Lab
+
+[![CI](https://github.com/simonro/Edge-GEX-Lab/actions/workflows/ci.yml/badge.svg)](https://github.com/simonro/Edge-GEX-Lab/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/simonro/Edge-GEX-Lab)](https://github.com/simonro/Edge-GEX-Lab/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+A local live map of modeled option gamma exposure (GEX) by strike for BTC and ETH (Deribit), SPY, QQQ, SPX, NDX and any
+optionable US stock. It shows the call wall, the put wall, every gamma flip, the regime at spot, how big
+net GEX is next to the stock's own daily dollar volume, and a trade guidance panel that turns the map
+into levels and scenarios with every number traceable to the map. Built for active traders who want to
+see where option gamma sits without paying for a GEX service.
+
+- **Runs on your computer.** No account, no telemetry, the server listens on `127.0.0.1` only. The
+  only call home is a once-a-day check for a new release, and you can turn it off.
+- **Every number is shown with how it was made.** OI date and source, feed, valuation time, coverage
+  and the sign assumption are on the map, not in a footnote.
+- **AI is optional and fenced.** The guidance is a deterministic template. "Explain this map" can ask
+  your local `claude` CLI for a narrative; a validator rejects any number or promise not in the data.
+- **Market data you control.** Your own Alpaca keys (the free plan works) plus Cboe's public delayed
+  quotes. REST only, rate capped.
+- **Free and MIT licensed.** No paid tier.
+
+**[Quick start](#quick-start)** · **[Releases](https://github.com/simonro/Edge-GEX-Lab/releases)** · **[Privacy](#privacy-and-your-data)**
+
+**What this is not:** Not financial advice. Not a signal service. The trade guidance is the textbook
+dealer-gamma reading of a model, untested, and says so on screen. Every screenshot below is synthetic
+demo data, not live market data.
+
+![The live map for SPY on synthetic demo data: GEX by strike, the call wall, the put wall, the gamma flip and the trade guidance panel](docs/screenshot-live-map.png)
+
+[![Watch: I Built a Free Gamma Exposure (GEX) Map You Can Understand](docs/video-thumbnail.jpg)](https://youtu.be/okQVLf2s3GI)
+
+**[I Built a Free Gamma Exposure (GEX) Map You Can Understand](https://youtu.be/okQVLf2s3GI)**: what GEX
+is and how traders use it, then the tool itself on demo data.
+
+## Privacy and your data
+
+Edge GEX Lab runs on your own computer. It needs no account, sends no telemetry, and the server
+listens on `127.0.0.1` only.
+
+### What stays local
+
+- Your Alpaca keys, in `.env` next to this README. They are read, never copied or logged.
+- Small caches (option chains, the exchange calendar, daily volume) in `data/`, which is not part of
+  the repo.
+
+### External services
+
+**Alpaca** (your account, REST only): stock trades and daily bars for the spot price and volume, option
+contracts and option quotes. It receives your API keys and the tickers you open. It never receives an
+order: the app calls no trading endpoint and never opens a websocket.
+
+**Cboe delayed quotes** (public, no account): the SPX and NDX option chains, and open interest for
+every ticker, from `cdn.cboe.com`. It receives the ticker you open. Fetched at most once per ticker per
+60 seconds. Cboe's site terms restrict automated use of these pages: you fetch them yourself, for
+personal research, at your own risk. Do not redistribute the data.
+
+**Your local `claude` CLI** (optional): only when you press "Explain this map". It receives the
+guidance object for that map and nothing else, runs with every tool, MCP server and setting disabled,
+and gets no API key from this app.
+
+**GitHub** (update check): when the server starts, at most once a day, it asks `api.github.com` for
+this repo's latest release. GitHub sees your IP address and the app version, nothing else: no keys, no
+tickers, no settings. If a newer version exists, a banner on the page and a line in the `launch.bat`
+window link to the release notes; nothing is downloaded or installed. It is silent when you are
+offline, demo mode never checks, and `set GEXLAB_NO_UPDATE_CHECK=1` before `launch.bat` turns it off.
+
+### API keys
+
+Keys live in `.env` on your machine, which is never committed. Do not share or commit `.env` files,
+caches or screenshots with your account details.
+
+## What's inside
+
+- **Live map**: net GEX by strike (signed, or unsigned by size), the call and put walls, every gamma
+  flip within 10% of spot, a hypothetical net GEX curve, an expiry picker (opens on the nearest expiry),
+  refreshed every 60 seconds and valued at the session close when the market is shut. Tickers you
+  search stay as one-click chips beside the search box (the last 6, kept in your browser).
+- **Net GEX size**: net and gross GEX per 1% move and per typical day (14-session ATR), as a share of
+  the ticker's 20-day average dollar volume. Indexes show none: their hedging trades mostly in futures.
+- **Trade guidance**: the environment (trend in negative gamma, mean reversion in positive gamma, mixed
+  when influence is low), levels to watch with distance from spot, 2 to 4 scenarios with entry, stop
+  and map-level targets (reward at least equal to risk), what would change the picture, and the
+  formula behind every computed price. No setups on a stale feed, old open interest, or a chain
+  missing too much of its gamma.
+- **Coverage you can see**: the share of the estimated |GEX| within 5% of spot held by contracts with
+  usable open interest and IV, and how many contracts were left out and why.
+- **Futures view**: the same levels as /ES or /MNQ equivalents for SPX, NDX, SPY and QQQ, with the
+  basis estimated from the option chain. See [Futures view](#futures-view).
+- **Vol drift and DEX**: whether at-the-money implied volatility is rising or falling since the session
+  began, and the size of call and put delta exposure from open interest. Context only, labeled
+  untested. See [Vol drift and DEX](#vol-drift-and-dex).
+- **Present mode** (key P): a larger layout for screen recording.
+
+## Crypto: BTC, ETH, SOL, TRX (Deribit + OKX)
+
+The same engine runs on crypto options, with no keys and no account. Open the app and it starts on BTC.
+
+| Coin | Deribit | OKX | Note |
+|---|---|---|---|
+| BTC, ETH | yes | yes | Both books are merged into one map. |
+| SOL, TRX | yes (USDC-margined) | no | Thin markets: few, illiquid options. The map says so; read the levels as rough. |
+| SUI, EGLD | no | no | Checked live: no venue lists options. The API answers 404 with a clear message; nothing is invented. |
+
+- **Sources.** Deribit and OKX public REST (one request set each, run in parallel). Open interest is live, converted to
+  coin units on every venue (OKX contracts x contract size), so strikes from both venues add up in one unit. IV is each
+  venue's own mark IV. Spot is Deribit's index (OKX's if Deribit is down); a warning appears if the two differ by more
+  than 0.5%.
+- **If one venue fails** the map is built from the other and says "Partial map" in the warnings; the feed bar shows each
+  venue's status and its share of |GEX|. If every venue fails the API answers 503.
+- **Black-76 on each expiry's forward.** Every expiry has its own forward (the venue's own), so gamma and the dollar scale
+  use it instead of spot: GEX = sign x N'(d1) / (F x IV x sqrt(T)) x OI x F^2 x 0.01. With F equal to spot this is
+  exactly the equity formula.
+- **24/7 clock.** Every option settles at 08:00 UTC on its expiry date. Times on screen are UTC. Contracts with less than
+  1 hour to settlement are left out.
+- **Wider bands.** Zero-gamma sweep, walls, displayed strikes and coverage use +-20% of spot (equities: 10%); the
+  coverage gate uses +-10%. The expiry window is 0 to 180 days. Low-priced coins (TRX 0.30) use a rounded sweep step and
+  per-coin price decimals.
+- **Size reference.** Net GEX is compared with Deribit's perpetual daily dollar volume and 14-day ATR. One venue only, so
+  shares of volume read larger than against all volume; the per typical day (1 ATR) view is the fairer comparison.
+- **What is not there yet.** Bybit, Binance and CME options are not included (named in the map's warnings). Vol drift,
+  frozen captures, the percentile history and the Futures view are equity-only for now.
+- **Caveats.** The sign assumption (calls +, puts -) is weaker in crypto, where covered-call vaults and risk reversals are
+  common: the unsigned view drops it. Not financial advice.
+
+`GEXLAB_DEMO=1` serves recorded Deribit/OKX snapshots, labeled as such. Refresh them with
+`python tools/snapshot_crypto.py`.
+
+## Screenshots
+
+**Live map.** GEX by strike around spot, with the walls and the gamma flip marked and the method
+drawer one click away. Synthetic demo data.
+
+![Live map on synthetic data](docs/screenshot-live-map.png)
+
+**Trade guidance.** Levels to watch, scenarios with entry, stop and targets, and the regime change
+triggers, each price traceable to the map. Synthetic demo data. For education only, not financial
+advice.
+
+![Trade guidance panel on synthetic data](docs/screenshot-guidance.png)
+
+## Quick start
+
+Requirements: [Python 3.11 or newer](https://www.python.org/downloads/), [Node.js LTS](https://nodejs.org/),
+and an [Alpaca](https://alpaca.markets/) account for its free API keys (SPX and NDX work without them).
+
+**Windows, two steps:** download or clone the repo, then double-click
+
+1. `setup.bat`, once. It installs everything, builds the web page and creates `.env` for your keys.
+   Open `.env` and paste your Alpaca key and secret.
+2. `launch.bat`, every time. It opens http://127.0.0.1:8240. Without Alpaca keys it opens on SPX,
+   which needs none.
+
+**Try it first with no keys and no network:** `launch.bat demo` (or set `GEXLAB_DEMO=1` before
+starting the server) serves synthetic fixtures for SPY, QQQ, SPX, NDX and NVDA. Every screen carries a
+"Synthetic fixture" badge, nothing in it is market data, and it writes only to `data/gexlab_demo.db`,
+so your real install stays empty. Close the window and run `launch.bat` to switch to your own data.
+
+**Manual setup (Mac, Linux, or if you prefer):**
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt     # Windows: .venv\Scripts\python
+cp .env.example .env                                     # then add your Alpaca keys
+cd web && npm ci && npm run build && cd ..
+.venv/bin/python -m uvicorn gexlab.api:app --host 127.0.0.1 --port 8240
+```
+
+**Install with an AI coding assistant:** if you use one (Claude Code, Codex, Cursor or similar), open it
+in an empty folder and paste this prompt:
+
+```text
+Install Edge GEX Lab on this computer from github.com/simonro/Edge-GEX-Lab. Follow the README Quick start
+exactly. First check that Python 3.11+ and Node.js LTS are installed, and if one is missing, tell me
+instead of installing it. Then run the setup, start the app and confirm http://127.0.0.1:8240 opens.
+Do not add any API keys. Show me where the .env file is so I can paste my own Alpaca keys.
+SPX works without keys.
+```
+
+Every install starts empty: no saved maps and no history. Open the page, pick a ticker, and the map
+loads from your own data feed.
+
+**If the web build fails on Windows** with "An Application Control policy has blocked this file":
+that is Smart App Control blocking a native build helper. The project builds with the WebAssembly
+version of Rollup to avoid it, so delete `web\node_modules` and run `setup.bat` again.
+
+## Updating to a new release
+
+Your keys (`.env`) and caches (`data/`) are not part of a release, so an update never touches them.
+When a new release is out, the app tells you with a banner at the top of the page (once a day, see
+Privacy above), linking to its release notes.
+
+**If you cloned with git:** `git pull`, then `setup.bat` (it rebuilds the page), then `launch.bat`.
+
+**If you downloaded the ZIP:** unzip the new version into a new folder, copy `.env` across, run
+`setup.bat` once, then `launch.bat`.
+
+## Configuration
+
+| Variable | Enables |
+|---|---|
+| `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY` | SPY, QQQ and stock maps (Alpaca quotes, spot and volume). SPX and NDX work without them. |
+| `ALPACA_MODE` | `paper` (default) or `live`: which Alpaca account the keys belong to. Market data is the same. |
+| `ALPACA_ENV_FILE` (environment variable, not `.env`) | Optional path to a `.env` file somewhere else that already holds your Alpaca keys, used instead of the `.env` next to this README. Keys set directly as environment variables win over both. |
+| `GEXLAB_PORT` (environment variable, not `.env`) | Port for `launch.bat` and the web dev server's proxy, 8240 by default. Example: `set GEXLAB_PORT=8250` then `launch.bat`. For the manual start, pass the same number to `--port`. |
+| `GEXLAB_NO_BROWSER` (environment variable, not `.env`) | `1` stops `launch.bat` from opening your browser. |
+| `GEXLAB_NO_UPDATE_CHECK` (environment variable, not `.env`) | `1` turns off the once-a-day check for a new release on GitHub. |
+| `GEXLAB_DEMO` (environment variable, not `.env`) | `1` serves the synthetic demo fixtures, the same as `launch.bat demo`. |
+| `GEXLAB_RECAP_MODEL` (environment variable, not `.env`) | Optional model name passed to your `claude` CLI for "Explain this map". |
+
+## How it works
+
+- **GEX per contract** = sign x gamma x open interest x 100 x spot squared x 0.01: dollars of dealer
+  delta change per 1% move. Gamma is Black-Scholes with r = q = 0, a stated approximation.
+- **The sign is an assumption.** Calls count as positive gamma and puts as negative (dealers long
+  calls, short puts). Real positioning is not public; the unsigned view drops the assumption.
+- **Open interest is daily and one session behind** for every tool, because OCC publishes it once a
+  day. It comes from Cboe, joined to Alpaca's contracts by OCC symbol; Cboe publishes no date, so the
+  date is inferred from the payload time and labeled. If Cboe is unavailable the map falls back to
+  Alpaca open interest and says so.
+- **Feeds.** Alpaca OPRA (paid) gives live quotes and the IV is solved from the mid; Alpaca's free
+  indicative feed gives a modified quote with its own IV. Alpaca computes no IV for contracts that expire
+  today, so on the free feed the app solves those from the indicative mid the same way it does on OPRA.
+  Checked side by side against OPRA on SPY and QQQ through a session, the walls matched and the flip
+  stayed within 0.25% of spot, but net GEX for today's expiry was off by as much as half. Trust the
+  levels on the free feed more than the bar sizes. SPX and NDX come from Cboe, about 15 minutes delayed. The map labels which one you are looking at.
+- **SPX and NDX before about 09:45 ET.** Cboe's delayed file still carries the prior session's index
+  close until its first live value arrives. The map labels spot "prior close" with Cboe's own time, the
+  gamma sign and distances say they are measured at that close, guidance shows no setups, and the
+  Futures view waits for live data before estimating a basis. The walls and the gamma flip come from
+  open interest by strike, so they still show.
+- **Valuation clock.** Time to expiry is measured from the quote time, and from the session close when
+  the market is shut, so a weekend map is not distorted.
+
+## Futures view
+
+If you trade /ES or /MNQ, flip the Live Map's **Index | Futures** toggle and every level reads as a
+futures price: the level cards show the futures value large with the index or ETF value underneath,
+the chart tags read like "CALL WALL /ES 7,791.00", and the guidance prices convert too. It is a
+display change only: the GEX math stays in index or ETF units, and the panel labels the result an
+estimate, not a futures quote.
+
+- **Which contract.** SPX maps to /ES (and /MES), NDX to /MNQ (and /NQ). The view uses the front
+  quarterly contract (Mar, Jun, Sep, Dec) and moves to the next one on CME's customary roll date, the
+  Monday before the third Friday.
+- **Where the basis comes from.** Put-call parity on the AM settled index options that expire with the
+  futures: forward = strike + e^(rT) x (call mid minus put mid), taken as the median over the strikes
+  nearest the forward. The basis is that forward minus the index value from the same Cboe payload, so
+  the 15 minute delay cancels out. No futures feed and no extra account. With fewer than 3 usable
+  strike pairs the view says it is unavailable instead of guessing.
+- **SPY and QQQ** convert to index points first, by the index to ETF price ratio at the same instant
+  (the Cboe index value and the last ETF trade at or before that second, from Alpaca). That needs your
+  Alpaca keys; without them the SPY and QQQ futures view is unavailable, like their maps.
+- **Your own price.** Type the live futures price you see into the panel and the basis becomes that
+  price minus the latest index value. When it differs from the parity estimate by more than 3 points
+  on /ES (12 on /MNQ), the panel warns.
+- **Rounding.** Futures = level x ratio + basis, rounded to the contract's 0.25 tick. The ratio is 1
+  for SPX and NDX.
+
+Works in demo mode on synthetic data, labeled as such. Not financial advice.
+
+## Vol drift and DEX
+
+Two context readings on the Live Map. Neither changes the GEX math, the levels or the guidance, and
+neither is tested: both carry an **Untested** chip.
+
+- **Vol drift** answers one question: is at-the-money implied volatility rising or falling today? It
+  reads the ATM IV of one expiry (the IVs of the two strikes around spot, interpolated to spot) and
+  compares it with the session's first reading after the open. The expiry is the nearest one with at
+  least 3 full trading days left, fixed for the whole session and never 0DTE, so the reference and the
+  current value measure the same contracts. The change counts as flat while it is smaller than
+  max(0.5 vol points, 5% of the reference IV); beyond that it reads rising or falling. The card pairs it
+  with the gamma regime as the conditions where moves tend to get bigger (rising IV in negative gamma)
+  or stay smaller (falling IV in positive gamma). A ticker that lists only Friday expiries can read
+  unavailable late in the week, when no expiry in the 7 day window has 3 full sessions left.
+- **DEX** is delta exposure: delta x open interest x 100 x spot, summed per side. Net DEX is call delta
+  exposure minus put delta exposure, so it reads positive when calls are larger and negative when puts
+  are, with each side's size shown unsigned. Open interest is the previous session's, so DEX sizes
+  yesterday's positioning at today's price and IV. It is not a live flow scoreboard.
+
+Not financial advice.
+
+## Contributing
+
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, tests and
+what a change needs. Please report security problems privately, as described in
+[SECURITY.md](SECURITY.md), not in a public issue.
+
+## More free tools from Tape to Edge
+
+Same rules for each one: free, MIT, runs on your own machine, and the build is on the [YouTube channel](https://www.youtube.com/@tapetoedge).
+
+- [Edge Scanner](https://github.com/simonro/edge-scanner): a real-time intraday stock scanner with a browser dashboard you lay out yourself.
+- [Trading Journal AI](https://github.com/simonro/Trading-Journal-AI): a local-first journal. Import your broker CSV, get round-trip trades, KPIs and AI diary analysis.
+- [AI Research Desk](https://github.com/simonro/ai-research-desk): three AI research teams debate one stock into swing and long-term calls.
+
+## Who made this
+
+I'm Simon, a trader who builds his own tools and films the process on Tape to Edge. This is the live
+map from my GEX research lab; the evidence side (frozen 10:00 levels, replays and pre-registered
+studies of whether the levels matter) stays private until it has enough sessions to say something.
+
+- YouTube: [@tapetoedge](https://www.youtube.com/@tapetoedge)
+- X: [@tapetoedge](https://x.com/tapetoedge)
+
+I take no affiliate money from any tool I show, and this project has no paid tier, no account and
+no telemetry. If it is useful, fork it.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Charts use TradingView Lightweight Charts (Apache 2.0).
