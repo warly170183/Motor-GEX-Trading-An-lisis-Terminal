@@ -92,7 +92,7 @@ caches or screenshots with your account details.
   untested. See [Vol drift and DEX](#vol-drift-and-dex).
 - **Present mode** (key P): a larger layout for screen recording.
 
-## Crypto: BTC, ETH, SOL, TRX (Deribit + OKX + Bybit)
+## Crypto: BTC, ETH, SOL, TRX (Deribit + OKX + Bybit + Binance)
 
 The same engine runs on crypto options, with no keys and no account. Open the app and it starts on BTC.
 
@@ -106,7 +106,15 @@ The same engine runs on crypto options, with no keys and no account. Open the ap
   payload in the documented shape, but **not yet verified against the live API** (Bybit blocks the cloud sandbox it was
   built in). The map warns about this. Run `python tools/check_bybit.py` on your machine to confirm units (open interest
   in coins, IV as a fraction). If Bybit is unreachable the map is built from the others with a "Partial map" warning.
-- **Sources.** Deribit, OKX and Bybit public REST (one request set each, run in parallel). Open interest is live, converted to
+- **Binance (fourth venue).** Public European Options REST (`eapi.binance.com`, no key): one `/mark` call for every contract, one
+  `/index` call and one `/openInterest` call per expiry. Binance lists options only for a few coins (BTC, ETH, SOL, BNB, XRP, DOGE), so
+  here it adds BTC, ETH and SOL; the other coins get "no options" from it. It gives no per-expiry forward, so its contracts use
+  spot, and its own gamma is ignored: the engine recomputes Black-76 gamma from Binance's mark IV like for every other venue.
+  Like Bybit it is written from the documentation, unit-tested on a payload in the documented shape and **not yet verified against
+  the live API** (Binance answers the cloud sandbox with HTTP 451). The map warns about this. Run `python tools/check_binance.py`
+  on your machine to confirm units (open interest in coins, IV as a fraction). Idea and endpoints from the public
+  `sfdcShrikant/crypto-gamma-dashboard` (MIT).
+- **Sources.** Deribit, OKX, Bybit and Binance public REST (one request set each, run in parallel). Open interest is live, converted to
   coin units on every venue (OKX contracts x contract size), so strikes from both venues add up in one unit. IV is each
   venue's own mark IV. Spot is Deribit's index (OKX's if Deribit is down); a warning appears if the two differ by more
   than 0.5%.
@@ -122,7 +130,7 @@ The same engine runs on crypto options, with no keys and no account. Open the ap
   per-coin price decimals.
 - **Size reference.** Net GEX is compared with Deribit's perpetual daily dollar volume and 14-day ATR. One venue only, so
   shares of volume read larger than against all volume; the per typical day (1 ATR) view is the fairer comparison.
-- **What is not there yet.** Binance and CME options are not included (named in the map's warnings). Vol drift,
+- **What is not there yet.** CME options are not included (named in the map's warnings). Vol drift,
   frozen captures, the percentile history and the Futures view are equity-only for now.
 - **Caveats.** The sign assumption (calls +, puts -) is weaker in crypto, where covered-call vaults and risk reversals are
   common: the unsigned view drops it. Not financial advice.

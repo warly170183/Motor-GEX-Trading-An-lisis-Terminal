@@ -2,6 +2,7 @@
 import json
 from datetime import datetime, timezone
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -219,6 +220,88 @@ def test_fetch_403_is_reported_as_unavailable_not_crash(monkeypatch):
     with pytest.raises(SourceError) as e:
         bybit.fetch_part("BTC", datetime.now(UTC))
     assert "country block" in str(e.value)
+
+
+# ---------------------------------------------------------------- Binance (documented payload shape, not verified live)
+
+from gexlab.sources import binance  # noqa: E402
+
+
+def _binance_marks():
+    mk = lambda sym, iv: {"symbol": sym, "markIV": iv, "markPrice": "100", "gamma": "0.00001"}  # noqa: E731
+    return [mk("BTC-261225-60000-C", "0.55"), mk("BTC-261225-60000-P", "0.57"), mk("BTC-261225-62000-C", "0.5"),
+            mk("BTC-261225-61000-C", "55"),                  # IV 5500%: implausible
+            mk("BTC-261225-63000-C", "0.5"),                 # no OI row: skipped
+            mk("ETH-261225-3000-C", "0.6"), mk("garbage", "0.5")]
+
+
+_BINANCE_OI = {"BTC-261225-60000-C": 12.5, "BTC-261225-60000-P": 30.0, "BTC-261225-62000-C": 8.0, "BTC-261225-61000-C": 5.0}
+
+
+def test_binance_symbols():
+    assert binance.parse_instrument("BTC-261225-60000-C")[1:] == (date(2026, 12, 25), 60000.0, "call")
+    assert binance.parse_instrument("SOL-270103-80-P")[1] == date(2027, 1, 3)
+    for bad in ("BTCUSDT", "BTC-261325-60000-C", "BTC-25DEC26-60000-C"):
+        with pytest.raises(ValueError):
+            binance.parse_instrument(bad)
+
+
+def test_binance_parse_units_and_guards():
+    p = binance.parse_part("BTC", _binance_marks(), "61000", _BINANCE_OI, datetime(2026, 11, 20, tzinfo=UTC))
+    assert p.venue == "binance" and len(p.contracts) == 4 and p.spot.price == 61000.0
+    c = next(c for c in p.contracts if c.symbol == "BTC-261225-60000-C")
+    assert c.oi == 12.5 and c.multiplier == 1 and c.iv == 0.55 and c.venue == "binance" and c.fwd is None
+    assert c.oi_source == "binance" and c.gamma is None          # Binance's own gamma is not used: the engine recomputes it
+    assert next(c for c in p.contracts if "61000" in c.symbol).iv is None
+    assert all("ETH" not in c.symbol for c in p.contracts)
+    assert any("not been verified" in w for w in p.warnings) and any("implausible" in w for w in p.warnings)
+
+
+def test_binance_no_options_and_no_index():
+    with pytest.raises(NoOptions):
+        binance.parse_part("SUI", _binance_marks(), "1", {}, datetime(2026, 11, 20, tzinfo=UTC))
+    with pytest.raises(SourceError):
+        binance.parse_part("BTC", _binance_marks(), None, _BINANCE_OI, datetime(2026, 11, 20, tzinfo=UTC))
+
+
+def test_binance_fetch_end_to_end_with_mock_transport():
+    seen = []
+
+    def handler(req):
+        seen.append(req.url.path)
+        if req.url.path.endswith("/mark"):
+            return httpx.Response(200, json=_binance_marks())
+        if req.url.path.endswith("/index"):
+            assert req.url.params["underlying"] == "BTCUSDT"
+            return httpx.Response(200, json={"indexPrice": "61000", "time": 1})
+        assert req.url.params["underlyingAsset"] == "BTC" and req.url.params["expiration"] == "261225"
+        return httpx.Response(200, json=[{"symbol": k, "sumOpenInterest": str(v), "sumOpenInterestUsd": "1"}
+                                         for k, v in _BINANCE_OI.items()])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    p = binance.fetch_part("BTC", datetime(2026, 11, 20, tzinfo=UTC), client)
+    assert len(p.contracts) == 4 and p.requests == 3 and p.raw_hash
+    assert [x.rsplit("/", 1)[1] for x in seen] == ["mark", "index", "openInterest"]
+
+
+def test_binance_451_is_reported_as_country_block():
+    client = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(451, text="blocked")))
+    with pytest.raises(SourceError) as e:
+        binance.fetch_part("BTC", datetime.now(UTC), client)
+    assert "country block" in str(e.value) and e.value.status == 451
+
+
+def test_four_venue_merge_and_binance_down_degrades():
+    now = datetime(2026, 11, 20, tzinfo=UTC)
+    d, (f, onow) = _dpart("BTC"), _okx("BTC")
+    o = okx.parse_part("BTC", *f, onow)
+    b = bybit.parse_part("BTC", _bybit_rows(d.spot.price), now)
+    n = binance.parse_part("BTC", _binance_marks(), str(d.spot.price), _BINANCE_OI, now)
+    ch = crypto.merge("BTC", now, [("binance", n, None), ("bybit", b, None), ("okx", o, None), ("deribit", d, None)])
+    assert ch.feed == "deribit+okx+bybit+binance" and [v["name"] for v in ch.venues] == ["deribit", "okx", "bybit", "binance"]
+    down = crypto.merge("BTC", now, [("deribit", d, None), ("okx", o, None), ("bybit", b, None),
+                                     ("binance", None, ("unavailable", "HTTP 451"))])
+    assert down.feed == "deribit+okx+bybit" and any("Partial map" in w and "Binance" in w for w in down.warnings)
 
 
 # ---------------------------------------------------------------- hedge flow strip

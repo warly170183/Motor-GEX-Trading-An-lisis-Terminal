@@ -433,7 +433,9 @@ def build_map(ticker: str, expiries: list[str] | None, signed: bool) -> dict:
                         "view drops it.")
     if crypto:
         inc = " + ".join(r["label"] for r in chain.venues if r["status"] == "ok") or "no venue"
-        warnings.append(f"Venues included: {inc}. {', '.join(config.VENUES_NOT_INCLUDED)} option positioning is not "
+        in_labels = {r["label"] for r in chain.venues if r["status"] == "ok"}
+        not_inc = [n for n in config.VENUES_NOT_INCLUDED if n not in in_labels]
+        warnings.append(f"Venues included: {inc}. {', '.join(not_inc)} option positioning is not "
                         f"included. Contracts with less than {config.CRYPTO_MIN_T_HOURS:g} h to their 08:00 UTC "
                         "settlement are left out.")
         if ticker in ("SOL", "TRX"):
@@ -545,7 +547,7 @@ DEX_METHOD = ("DEX per contract = delta x OI x 100 x spot, in dollars of the und
               "expiries only, as in GEX.")
 
 
-DEX_CAVEAT_CRYPTO = ("Live open interest from each listed venue (Deribit, OKX) in coin units, sized at the current index and the mark IV. Delta is "
+DEX_CAVEAT_CRYPTO = ("Live open interest from each listed venue (Deribit, OKX, Bybit, Binance) in coin units, sized at the current index and the mark IV. Delta is "
                      "Black-76 on each expiry's forward. Open interest changes through the day, so this is a snapshot of "
                      "positioning, not a flow scoreboard.")
 DEX_METHOD_CRYPTO = ("DEX per contract = delta x OI x 1 x spot, in dollars of the underlying (OI in coin units). Delta is "

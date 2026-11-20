@@ -55,7 +55,7 @@ class Contract:
     gamma: float | None = None
     gex: float | None = None        # signed, dollars per 1% move
     T: float | None = None          # years to settlement at as_of
-    venue: str | None = None        # crypto: which exchange this row came from (deribit | okx); None for equities
+    venue: str | None = None        # crypto: which exchange this row came from (deribit | okx | bybit | binance); None for equities
     fwd: float | None = None        # forward of the underlying for THIS expiry (crypto: Deribit underlying_price); None = spot
     fwd_ratio: float = 1.0          # fwd / spot at the map's spot, so a hypothetical spot S carries the forward S * fwd_ratio
     valid: bool = False

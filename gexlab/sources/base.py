@@ -36,7 +36,7 @@ class SourceError(RuntimeError):
 class VenuePart:
     """What one exchange contributed to a crypto map: its contracts, its own index price and its provenance.
     The aggregator (sources/crypto.py) merges parts into one Chain."""
-    venue: str                                  # deribit | okx
+    venue: str                                  # deribit | okx | bybit | binance
     contracts: list
     spot: object                                # models.Spot: this venue's index
     valuation_ts: datetime | None               # the venue's own server clock for the snapshot

@@ -1,4 +1,4 @@
-"""Crypto aggregator: asks every venue (Deribit, OKX) at once and merges what answers into one Chain.
+"""Crypto aggregator: asks every venue (Deribit, OKX, Bybit, Binance) at once and merges what answers into one Chain.
 
 Rules (honesty first):
   * A venue that lists no options for the coin (NoOptions) is a fact, reported as `no_options`, never an error.
@@ -7,7 +7,7 @@ Rules (honesty first):
     (the API turns that into a 404 with a clear message). Nothing is ever invented.
   * Contracts are never netted across venues: each keeps its own `venue`, and the engine sums GEX per strike, which is the
     right answer because open interest on different exchanges is different positions.
-  * Spot is the first available venue index in config.VENUES order (Deribit, OKX, Bybit). If two indexes differ by more than
+  * Spot is the first available venue index in config.VENUES order (Deribit, OKX, Bybit, Binance). If two indexes differ by more than
     SPOT_DISAGREE_PCT a warning says so.
 """
 from __future__ import annotations
@@ -18,12 +18,13 @@ from datetime import datetime
 
 from gexlab import config
 from gexlab.models import Chain
-from gexlab.sources import bybit, deribit, okx
+from gexlab.sources import binance, bybit, deribit, okx
 from gexlab.sources.base import NoOptions, SourceError, VenuePart
 
 SPOT_DISAGREE_PCT = 0.5
 
-_FETCHERS = {"deribit": deribit.fetch_part, "okx": okx.fetch_part, "bybit": bybit.fetch_part}
+_FETCHERS = {"deribit": deribit.fetch_part, "okx": okx.fetch_part, "bybit": bybit.fetch_part,
+             "binance": binance.fetch_part}
 
 
 def _attempt(venue: str, ticker: str, now: datetime):

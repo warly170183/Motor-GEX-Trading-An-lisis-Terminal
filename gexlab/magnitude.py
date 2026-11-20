@@ -249,7 +249,7 @@ CRYPTO_PER_ATR_METHOD = ("Linear: the hedge per 1% times the ATR in percent. ATR
                          "last 14 completed daily bars of Deribit's perpetual (each bar runs 08:00 to 08:00 UTC, the "
                          "option settlement clock), divided by spot. Gamma changes as price moves, so this is a rough "
                          "size for a typical day, not a forecast.")
-CRYPTO_NOTE = ("Crypto options positioning here combines the venues the map lists (Deribit, plus OKX where it lists the coin); Bybit and CME are not included. The volume reference is Deribit's perpetual, one "
+CRYPTO_NOTE = ("Crypto options positioning here combines the venues the map lists (Deribit, plus OKX, Bybit and Binance where they list the coin); CME is not included. The volume reference is Deribit's perpetual, one "
                "venue of several, so shares of volume read larger than they would against all spot and derivatives "
                "volume. The per typical day view (1 ATR) is the better cross-asset comparison.")
 CRYPTO_PERCENTILE_BASIS = "No frozen-capture history exists for crypto yet, so there is no percentile."

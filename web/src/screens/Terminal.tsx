@@ -198,7 +198,7 @@ export default function Terminal({ ticker, onTicker }: Props) {
         </aside>
       </div>
       <p className="term-note">
-        GEX levels come from the same map as the Live map screen (Deribit + OKX + Bybit where available). Net GEX is dollars of delta
+        GEX levels come from the same map as the Live map screen (Deribit + OKX + Bybit + Binance where available). Net GEX is dollars of delta
         exposure per 1% move under the calls +, puts - assumption. Research tool, not advice.
       </p>
     </div>
