@@ -229,7 +229,7 @@ export interface GexMap {
   model_version: string;
   /** basis: last_trade (in session), regular_close (market closed: official session close), payload (Cboe),
    *  prior_close (Cboe with the market open but the index value from before today's open; ts is the index's own time). */
-  spot: { price: number; ts: string; source: string; basis?: "last_trade" | "regular_close" | "payload" | "prior_close" };
+  spot: { price: number; ts: string; source: string; basis?: "last_trade" | "regular_close" | "payload" | "prior_close" | "parity" };
   /** The one clock T is measured from. label is set only when the market is closed. */
   valuation?: { ts: string; basis: "quote_time" | "session_close"; label: string | null };
   feed: { kind: FeedKind; label: string; stale: boolean; market_open: boolean; last_success: string | null; data_ts?: string | null };
@@ -268,8 +268,34 @@ export interface GexMap {
   /** Crypto only: modeled dealer flow per price step (+ buy, - sell, dollars). null for equities. */
   hedge_flow?: HedgeFlow | null;
   frozen_today: FrozenToday | null;
+  /** SPX/NDX only (null otherwise): the index now, estimated from the live SPY/QQQ trade, because Cboe's value runs
+   *  about 15 minutes behind. The readings (regime ... at_flip) are present only when available and quotes are usable. */
+  live_spot?: LiveSpot | null;
+  /** Today's 10:00 frozen capture is missing, late or invalid: the reason in plain words. Null or absent when fine. */
+  capture_alert?: { kind: "missing" | "late" | "invalid"; text: string } | null;
   lead: string;
   warnings: string[];
+}
+
+export interface LiveSpot {
+  available: boolean;
+  reason: string | null;
+  etf: string;
+  delayed_price: number;
+  delayed_time: string | null;
+  price?: number;
+  ts?: string;
+  age_s?: number;
+  diff?: number;
+  diff_pct?: number | null;
+  method?: string | null;
+  regime?: "positive" | "negative" | "neutral";
+  call_gex?: number;
+  put_gex?: number;
+  net_gex?: number;
+  nearest_zero_gamma?: number | null;
+  at_flip?: boolean;
+  flip_band?: number;
 }
 
 export interface CaptureRow {
@@ -576,6 +602,8 @@ export interface FuturesParity {
   usable_pairs: number;
   spread: number | null;
   option_root: string;
+  /** alpaca: live parity spot and Alpaca quotes (SPX since 2026-11-20); cboe: the delayed Cboe file. */
+  source?: "alpaca" | "cboe";
   option_expiry: string | null;
   settlement: "AM";
   as_of: string | null;

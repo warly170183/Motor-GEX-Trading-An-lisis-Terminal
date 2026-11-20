@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------- identity
-APP_VERSION = "1.2.1"            # The public release this build is. Bump it before tagging a release: the update check
+APP_VERSION = "1.3.2"            # The public release this build is. Bump it before tagging a release: the update check
                                  # (gexlab/update_check.py) compares it with GitHub's latest release tag.
 UPDATE_REPO = "simonro/Edge-GEX-Lab"  # Where the update check looks for releases (the public repo).
 UPDATE_EVERY_H = 24              # At most one update check a day; the answer is cached in CACHE_DIR.
@@ -36,9 +36,29 @@ GATE_VERSION = "1.3"             # Capture eligibility gate. 1.3 (2026-10-19 eve
                                  # it. The GEX math is unchanged, so MODEL_VERSION stays 1.0, and the study protocol
                                  # (touches, placebo seeds) is unchanged, so the study protocol version stays 1.0.
 PINNED_TICKERS = ["BTC", "ETH", "SOL", "TRX", "SUI", "EGLD", "SPY", "QQQ", "SPX", "NDX"]  # Crypto first, then the four equity chips.
-CBOE_TICKERS = {"SPX", "NDX"}    # SPEC: Alpaca has no SPX/NDX quotes, so these come from Cboe.
+INDEX_TICKERS = {"SPX", "NDX"}   # Quoted in index points (whole-number prices), whatever the source.
+# Index source (2026-11-20). Cboe put its free delayed quotes behind a Cloudflare bot challenge after the Nov 19 close
+# (cdn.cboe.com now redirects to cdn-api.cboe.com and answers scripts with HTTP 403). Alpaca lists SPX index options
+# (SPX monthlies and SPXW weeklies) with OCC open interest: 14 of 14 contracts matched Cboe's Nov 18 OI exactly. Tested
+# 2026-11-20 against OPRA, 4 rounds: the free feed with every IV solved from its quotes gave the same call and put
+# walls every round, net GEX within 3.5%, spot within 1.5 pt; the vendor-IV path left 85% of contracts invalid.
+# Alpaca has no NDX options and no index level, so SPX spot comes from put-call parity and NDX stays on Cboe.
+# GEXLAB_INDEX_SOURCE=cboe puts SPX back on Cboe if it ever reopens.
+INDEX_SOURCE = os.getenv("GEXLAB_INDEX_SOURCE", "alpaca").strip().lower()
+ALPACA_INDEX = {"SPX": {"roots": ("SPX", "SPXW"), "etf": "SPY", "ratio": (9.6, 10.4)}}
+                                 # roots: Alpaca keys option snapshots by root, so each root is asked for by name (SPX
+                                 # alone returns only the monthlies). etf x ratio bounds the strikes before the parity
+                                 # spot is known (SPX/SPY ran 10.0 to 10.1 through 2026).
+if INDEX_SOURCE != "alpaca":
+    ALPACA_INDEX = {}
+CBOE_TICKERS = INDEX_TICKERS - set(ALPACA_INDEX)   # SPEC: index chains Alpaca does not carry come from Cboe.
 CBOE_ROOTS = {"SPX": {"SPX": "AM", "SPXW": "PM"},
               "NDX": {"NDX": "AM", "NDXP": "PM"}}  # SPEC: monthly roots settle AM, weeklies PM.
+ROOT_SETTLEMENT = {root: s for roots in CBOE_ROOTS.values() for root, s in roots.items()}
+INDEX_PARITY_PAIRS = 6           # Parity spot: median forward of the 6 strikes nearest the money (smallest |C - P|).
+INDEX_PARITY_MIN_PAIRS = 3       # Fewer usable call/put pairs at the nearest expiry: try the next expiry.
+INDEX_PARITY_MAX_SPREAD = 0.002  # The pairs' forwards must agree within 0.2% of price (SPX: about 14 pt), else next expiry.
+INDEX_PARITY_MAX_AGE_S = 120     # In session, a quote older than this never enters the parity spot.
 
 # ---------------------------------------------------------------- modes
 def is_demo() -> bool:
@@ -100,10 +120,18 @@ CBOE_FIRST_QUOTES_MIN = 20       # Minutes after the open by which the delayed p
                                  # (2026-10-20 to 10-23: the 09:45 payload was stamped 09:42 to 09:44 ET, about 09:27
                                  # market time, and had none; by 09:48 SPX was usable).
 CBOE_LOCK_TIMEOUT_S = 120        # Max wait for the cross-process Cboe cache lock (a 13 MB fetch can take a while).
-OI_SOURCE = "cboe"               # Open interest for Alpaca-quoted tickers (SPY, QQQ, stocks): "cboe" or "alpaca".
+OI_SOURCE = os.getenv("GEXLAB_OI_SOURCE", "occ").strip().lower()
+                                 # Open interest for Alpaca-quoted tickers (SPY, QQQ, SPX, stocks): "occ" (since
+                                 # 2026-11-20, see sources/occ.py), "cboe" (before; Cboe now blocks apps) or "alpaca".
                                  # Verified 2026-10-19 11:50 ET: Alpaca still served OI dated Thu Oct 15 for QQQ Oct 19
                                  # (calls 50,757 / puts 73,657 at strikes 700 to 750) while Cboe carried Friday's
                                  # positioning (157,975 / 141,447). Quotes, spot and IV stay on Alpaca; only OI moves.
+OCC_SERIES_URL = "https://marketdata.theocc.com/series-search"  # OCC's documented batch URL (symbolType=U&symbol=X).
+OCC_CACHE_S = 1800               # OCC open interest changes once a day: one download per ticker per 30 min, same NY day.
+OCC_FAIL_COOLDOWN_S = 300        # After a failed OCC download, wait this long before asking again (the map keeps Alpaca OI).
+OCC_TIMEOUT_S = 20               # SPX's file is about 1.4 MB, SPY's 0.4 MB (1.5 s on 2026-11-20).
+OCC_OI_MIN_MATCH = 0.90          # OCC must list at least 90% of the Alpaca contracts, or the chain keeps Alpaca OI, labeled.
+OCC_FRESH_AFTER = time(7, 0)     # A download before 07:00 ET may still be the older overnight file: dated one session earlier.
 CBOE_OI_CACHE_S = 600            # OI changes once a day, so an OI-only payload is reused for 10 min (>= the 60 s floor).
 CBOE_OI_MIN_MATCH = 0.90         # Cboe must list at least 90% of the Alpaca contracts (by OCC symbol) or the whole
                                  # chain falls back to Alpaca OI, labeled. Below that the payload is not the same chain.
@@ -273,6 +301,7 @@ FUTURES_PARITY_STRIKES = 6       # Strikes used: the 6 nearest the forward with 
 FUTURES_PARITY_MIN = 3           # Fewer usable strike pairs than this: the parity basis is unavailable, never a guess.
 FUTURES_PARITY_WARN_FRAC = 0.0005  # Warn when the per-strike forwards spread more than 0.05% of spot (SPX near 3.9 pt,
                                  # NDX near 15 pt). Measured 2026-10-21 11:59 ET: SPX 0.07 pt, NDX 1.10 pt.
+FUTURES_STRIKE_BAND = 0.03       # Alpaca index (SPX): quarterly AM quotes fetched within 3% of spot for the parity basis.
 FUTURES_TICK = 0.25              # /ES, /MES, /NQ and /MNQ all tick 0.25 index points.
 FUTURES_RATIO_MAX_LAG_S = 90     # SPY/QQQ ratio: the ETF trade used must print within 90 s before the index value's time.
 FUTURES_BASIS_WINDOW_S = 300     # The parity basis shown is the median over the Cboe payloads of the last 5 minutes (by payload
