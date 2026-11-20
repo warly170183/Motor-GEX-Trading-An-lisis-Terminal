@@ -1,10 +1,4 @@
-"""Shared HTTP plumbing: cross-process rate limiter, backoff, raw-body hashing.
-
-The limiter counts Alpaca requests only (the 60/min cap is an Alpaca budget).
-It lives in a tiny SQLite file so the API server and the recorder CLI, which
-are separate processes, share one budget. Priority: the recorder may use the
-full cap; the live map stops at cap minus RATE_RESERVE_FOR_RECORDER.
-"""
+"""Shared HTTP plumbing: backoff, raw-body hashing, cross-process file lock."""
 from __future__ import annotations
 
 import hashlib
@@ -53,72 +47,6 @@ class NoOptions(SourceError):
         super().__init__(msg, status=404)
 
 
-class RateLimiter:
-    """Sliding 60 s window shared through SQLite. Thread and process safe."""
-
-    def __init__(self, path: Path | str | None = None, cap: int | None = None,
-                 reserve: int | None = None, clock: Callable[[], float] = time.time,
-                 sleep: Callable[[float], None] = time.sleep):
-        self.path = Path(path or config.RATE_DB)
-        self.cap = cap or config.RATE_CAP_PER_MIN
-        self.reserve = config.RATE_RESERVE_FOR_RECORDER if reserve is None else reserve
-        self.clock, self.sleep = clock, sleep
-        self._lock = threading.Lock()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._conn() as c:
-            c.execute("CREATE TABLE IF NOT EXISTS hits (ts REAL NOT NULL, who TEXT)")
-
-    def _conn(self):
-        c = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-        return c
-
-    def _limit(self, priority: str) -> int:
-        return self.cap if priority == "high" else self.cap - self.reserve
-
-    def used_last_min(self) -> int:
-        with self._lock:
-            c = self._conn()
-            try:
-                return c.execute("SELECT COUNT(*) FROM hits WHERE ts > ?",
-                                 (self.clock() - 60,)).fetchone()[0]
-            finally:
-                c.close()
-
-    def acquire(self, priority: str = "low", who: str = "api", max_wait_s: float = 120) -> None:
-        deadline = self.clock() + max_wait_s
-        limit = self._limit(priority)
-        while True:
-            with self._lock:
-                c = self._conn()
-                try:
-                    c.execute("BEGIN IMMEDIATE")
-                    now = self.clock()
-                    c.execute("DELETE FROM hits WHERE ts <= ?", (now - 60,))
-                    rows = c.execute("SELECT ts FROM hits ORDER BY ts").fetchall()
-                    if len(rows) < limit:
-                        c.execute("INSERT INTO hits (ts, who) VALUES (?, ?)", (now, who))
-                        c.execute("COMMIT")
-                        return
-                    c.execute("COMMIT")
-                    oldest_needed = rows[len(rows) - limit][0]
-                    wait = max(0.05, oldest_needed + 60 - now)
-                finally:
-                    c.close()
-            if self.clock() + wait > deadline:
-                raise SourceError("rate cap reached; request not sent", status=429)
-            self.sleep(wait)
-
-
-_LIMITER: RateLimiter | None = None
-
-
-def limiter() -> RateLimiter:
-    global _LIMITER
-    if _LIMITER is None:
-        _LIMITER = RateLimiter()
-    return _LIMITER
-
-
 class Hasher:
     """sha256 over the raw response bodies in fetch order (stored as response_hash)."""
 
@@ -136,18 +64,15 @@ class Hasher:
 
 
 def get_with_backoff(client: httpx.Client, url: str, *, params: dict | None = None,
-                     headers: dict | None = None, rate: RateLimiter | None = None,
-                     priority: str = "low", who: str = "api",
+                     headers: dict | None = None,
                      sleep: Callable[[float], None] = time.sleep) -> httpx.Response:
-    """GET with the shared limiter and exponential backoff on 429 / 5xx / network errors.
+    """GET with exponential backoff on 429 / 5xx / network errors.
 
     4xx other than 429 are returned to the caller unretried (403 means "not
     entitled", which feed detection needs to see).
     """
     last_exc: Exception | None = None
     for attempt in range(config.HTTP_MAX_RETRIES + 1):
-        if rate is not None:
-            rate.acquire(priority, who)
         try:
             r = client.get(url, params=params, headers=headers)
         except httpx.HTTPError as e:

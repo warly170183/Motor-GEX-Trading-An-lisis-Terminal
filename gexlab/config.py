@@ -17,10 +17,8 @@ APP_VERSION = "1.3.2"            # The public release this build is. Bump it bef
 UPDATE_REPO = "simonro/Edge-GEX-Lab"  # Where the update check looks for releases (the public repo).
 UPDATE_EVERY_H = 24              # At most one update check a day; the answer is cached in CACHE_DIR.
 UPDATE_TIMEOUT_S = 3             # The check gives up after 3 s, silently.
-MODEL_VERSION = "1.1"           # Model/input version, stored on every capture. 1.0 = SPEC math with Alpaca OI for
-                                 # SPY, QQQ and stocks. 1.1 (2026-10-19, Cboe OI switch): same gamma math, but open
-                                 # interest for Alpaca-quoted tickers now comes from Cboe (OI_SOURCE). Inputs changed,
-                                 # so the version moved; the capture gate stays 1.2.
+MODEL_VERSION = "1.1"           # Model/input version, stored on every capture. 1.1: same gamma math as 1.0, but the
+                                 # open interest inputs changed vendor, so the version moved; the capture gate stays 1.2.
 GATE_VERSION = "1.3"             # Capture eligibility gate. 1.3 (2026-10-19 evening, day-1 audit): 1.2 plus
                                  # (a) open interest must be from the previous completed session (OI_STALE_MAX_FRAC),
                                  # (b) a band contract with OI whose |GEX| cannot be estimated (no donor IV) fails the
@@ -35,30 +33,7 @@ GATE_VERSION = "1.3"             # Capture eligibility gate. 1.3 (2026-10-19 eve
                                  # with no value were judged by 1.0, and every row keeps the status its own gate gave
                                  # it. The GEX math is unchanged, so MODEL_VERSION stays 1.0, and the study protocol
                                  # (touches, placebo seeds) is unchanged, so the study protocol version stays 1.0.
-PINNED_TICKERS = ["BTC", "ETH", "SOL", "TRX", "SUI", "EGLD", "SPY", "QQQ", "SPX", "NDX"]  # Crypto first, then the four equity chips.
-INDEX_TICKERS = {"SPX", "NDX"}   # Quoted in index points (whole-number prices), whatever the source.
-# Index source (2026-11-20). Cboe put its free delayed quotes behind a Cloudflare bot challenge after the Nov 19 close
-# (cdn.cboe.com now redirects to cdn-api.cboe.com and answers scripts with HTTP 403). Alpaca lists SPX index options
-# (SPX monthlies and SPXW weeklies) with OCC open interest: 14 of 14 contracts matched Cboe's Nov 18 OI exactly. Tested
-# 2026-11-20 against OPRA, 4 rounds: the free feed with every IV solved from its quotes gave the same call and put
-# walls every round, net GEX within 3.5%, spot within 1.5 pt; the vendor-IV path left 85% of contracts invalid.
-# Alpaca has no NDX options and no index level, so SPX spot comes from put-call parity and NDX stays on Cboe.
-# GEXLAB_INDEX_SOURCE=cboe puts SPX back on Cboe if it ever reopens.
-INDEX_SOURCE = os.getenv("GEXLAB_INDEX_SOURCE", "alpaca").strip().lower()
-ALPACA_INDEX = {"SPX": {"roots": ("SPX", "SPXW"), "etf": "SPY", "ratio": (9.6, 10.4)}}
-                                 # roots: Alpaca keys option snapshots by root, so each root is asked for by name (SPX
-                                 # alone returns only the monthlies). etf x ratio bounds the strikes before the parity
-                                 # spot is known (SPX/SPY ran 10.0 to 10.1 through 2026).
-if INDEX_SOURCE != "alpaca":
-    ALPACA_INDEX = {}
-CBOE_TICKERS = INDEX_TICKERS - set(ALPACA_INDEX)   # SPEC: index chains Alpaca does not carry come from Cboe.
-CBOE_ROOTS = {"SPX": {"SPX": "AM", "SPXW": "PM"},
-              "NDX": {"NDX": "AM", "NDXP": "PM"}}  # SPEC: monthly roots settle AM, weeklies PM.
-ROOT_SETTLEMENT = {root: s for roots in CBOE_ROOTS.values() for root, s in roots.items()}
-INDEX_PARITY_PAIRS = 6           # Parity spot: median forward of the 6 strikes nearest the money (smallest |C - P|).
-INDEX_PARITY_MIN_PAIRS = 3       # Fewer usable call/put pairs at the nearest expiry: try the next expiry.
-INDEX_PARITY_MAX_SPREAD = 0.002  # The pairs' forwards must agree within 0.2% of price (SPX: about 14 pt), else next expiry.
-INDEX_PARITY_MAX_AGE_S = 120     # In session, a quote older than this never enters the parity spot.
+PINNED_TICKERS = ["BTC", "ETH", "SOL", "TRX", "SUI", "EGLD"]  # The coins the app serves.
 
 # ---------------------------------------------------------------- modes
 def is_demo() -> bool:
@@ -68,86 +43,20 @@ def is_demo() -> bool:
 
 FIXTURES_DIR = ROOT / "fixtures"             # Synthetic inputs for DEMO mode and tests.
 DEMO_DB_DEFAULT = ROOT / "data" / "gexlab_demo.db"  # DEMO writes never touch the research DB (GEXLAB_DEMO_DB overrides).
-CACHE_DIR = ROOT / "data" / "cache"          # Gitignored (data/); holds the Cboe payload cache and asset list.
+CACHE_DIR = ROOT / "data" / "cache"          # Gitignored (data/); holds cached daily bars (ADV and ATR).
 API_PORT = int(os.getenv("GEXLAB_PORT") or 8240)  # API port, 8240 by default. launch.bat reads the same GEXLAB_PORT.
 
-# ---------------------------------------------------------------- Alpaca
-ALPACA_DATA_BASE = "https://data.alpaca.markets"  # Market data host (REST only, never the websocket).
-ALPACA_TRADING_BASES = {"paper": "https://paper-api.alpaca.markets",
-                        "live": "https://api.alpaca.markets"}  # SPEC: ALPACA_MODE picks the trading base.
-CONTRACTS_PAGE_LIMIT = 10000     # Alpaca maximum per page for /v2/options/contracts; fewest requests.
-SNAPSHOTS_PAGE_LIMIT = 1000      # Alpaca maximum per page for option snapshots.
+# ---------------------------------------------------------------- feed labels and HTTP
 FEED_LABELS = {
-    "opra": "OPRA quotes, refreshed 60s",
-    "indicative": "Indicative quotes, modified; trades delayed 15m",
-    "cboe_delayed": "Cboe delayed quotes (about 15 min)",
     "demo": "Synthetic fixture",
     "demo_crypto": "Recorded Deribit snapshot (demo)",
     "deribit": "Deribit public API, refreshed 60s",
     "okx": "OKX public API, refreshed 60s",
     "deribit+okx": "Deribit + OKX public APIs, refreshed 60s",
-}                                # SPEC: labels exactly as written.
-FEED_REDETECT_S = 3600           # Re-test OPRA entitlement hourly so an upgraded plan is picked up without a restart.
-ASSET_CACHE_S = 86400            # SPEC: asset list for search is cached daily.
-CALENDAR_CACHE_S = 21600         # Calendar changes rarely; 6 h keeps early closes current without spamming.
-CALENDAR_RETRY_S = 300           # After a failed calendar fetch, retry in 5 min instead of trusting a fallback for 6 h.
-CALENDAR_DISK_CACHE = ROOT / "data" / "cache" / "calendar_alpaca.json"  # Last validated exchange calendar, survives restarts.
-CONTRACTS_CACHE_S = 1800         # OI moves once a day; 30 min avoids refetching thousands of contracts every refresh.
-
-# ---------------------------------------------------------------- rate limits
-RATE_CAP_PER_MIN = 60            # SPEC: app-level cap on Alpaca requests per minute.
-RATE_RESERVE_FOR_RECORDER = 15   # SPEC "recorder has priority": the live map may use at most 45 of the 60.
-RATE_DB = ROOT / "data" / "ratelimit.sqlite"  # Shared across the API and recorder processes.
-HTTP_TIMEOUT_S = 30              # Snapshots pages can be slow; long enough not to fail on a healthy API.
-HTTP_MAX_RETRIES = 4             # 429/5xx backoff attempts before giving up on a page.
+}                                # Labels exactly as written.
+HTTP_MAX_RETRIES = 4             # 429/5xx backoff attempts before giving up on a request.
 HTTP_BACKOFF_BASE_S = 1.5        # Exponential backoff base (1.5, 3, 6, 12 s) unless Retry-After says otherwise.
 
-# ---------------------------------------------------------------- Cboe
-CBOE_URL = "https://cdn.cboe.com/api/global/delayed_quotes/options/{symbol}.json"  # SPEC source. Indexes take a
-                                 # leading underscore (_SPX, _NDX); ETFs and stocks do not (SPY, QQQ, AAPL).
-CBOE_INDEX_SYMBOLS = {"SPX": "_SPX", "NDX": "_NDX"}  # Cboe payload symbol for each index we serve.
-CBOE_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                   "(KHTML, like Gecko) Chrome/129.0 Safari/537.36 GEXLab/1.0 (personal research, polite)")
-                                 # SPEC: needs a browser User-Agent; we also identify ourselves.
-CBOE_CACHE_S = 60                # SPEC: at most one fetch per ticker per 60 s (disk cache, shared by processes).
-CBOE_TIMESTAMP_TZ = "UTC"        # Verified 2026-10-17: payload "13:32:46" arrived at 09:33 ET, so it is UTC.
-CBOE_MAX_PAYLOAD_AGE_S = 300     # Frozen capture: the payload must be generated within 5 min of the run's completion.
-CBOE_OPEN_GAP_MIN = 30           # Verified 2026-10-20: the 09:42 ET payload (about 09:27 market time) had bid 0, ask 0 and
-                                 # iv 0 on every SPXW contract; by 09:45 ET 144 of 339 were usable. A chain with no quotes
-                                 # this soon after the open is labeled as the delayed feed's first minutes, not a market state.
-CBOE_DELAY_MIN = 15              # Cboe's public quotes run about 15 minutes behind the market (named in the lead).
-CBOE_FIRST_QUOTES_MIN = 20       # Minutes after the open by which the delayed payload has carried quotes every day so far
-                                 # (2026-10-20 to 10-23: the 09:45 payload was stamped 09:42 to 09:44 ET, about 09:27
-                                 # market time, and had none; by 09:48 SPX was usable).
-CBOE_LOCK_TIMEOUT_S = 120        # Max wait for the cross-process Cboe cache lock (a 13 MB fetch can take a while).
-OI_SOURCE = os.getenv("GEXLAB_OI_SOURCE", "occ").strip().lower()
-                                 # Open interest for Alpaca-quoted tickers (SPY, QQQ, SPX, stocks): "occ" (since
-                                 # 2026-11-20, see sources/occ.py), "cboe" (before; Cboe now blocks apps) or "alpaca".
-                                 # Verified 2026-10-19 11:50 ET: Alpaca still served OI dated Thu Oct 15 for QQQ Oct 19
-                                 # (calls 50,757 / puts 73,657 at strikes 700 to 750) while Cboe carried Friday's
-                                 # positioning (157,975 / 141,447). Quotes, spot and IV stay on Alpaca; only OI moves.
-OCC_SERIES_URL = "https://marketdata.theocc.com/series-search"  # OCC's documented batch URL (symbolType=U&symbol=X).
-OCC_CACHE_S = 1800               # OCC open interest changes once a day: one download per ticker per 30 min, same NY day.
-OCC_FAIL_COOLDOWN_S = 300        # After a failed OCC download, wait this long before asking again (the map keeps Alpaca OI).
-OCC_TIMEOUT_S = 20               # SPX's file is about 1.4 MB, SPY's 0.4 MB (1.5 s on 2026-11-20).
-OCC_OI_MIN_MATCH = 0.90          # OCC must list at least 90% of the Alpaca contracts, or the chain keeps Alpaca OI, labeled.
-OCC_FRESH_AFTER = time(7, 0)     # A download before 07:00 ET may still be the older overnight file: dated one session earlier.
-CBOE_OI_CACHE_S = 600            # OI changes once a day, so an OI-only payload is reused for 10 min (>= the 60 s floor).
-CBOE_OI_MIN_MATCH = 0.90         # Cboe must list at least 90% of the Alpaca contracts (by OCC symbol) or the whole
-                                 # chain falls back to Alpaca OI, labeled. Below that the payload is not the same chain.
-CBOE_OI_BUDGET_S = 25           # End-to-end budget for the OI overlay (cache lock wait plus the HTTP fetch). The spot is
-                                 # already read, so a slow Cboe falls back to Alpaca OI (labeled, and failed by the OI
-                                 # freshness gate if that OI is old) before the 60 s spot-age gate can fail the capture.
-CBOE_CHAIN_BUDGET_S = 75         # End-to-end budget for a recorder index chain (SPX, NDX): lock wait plus a 7 to 13 MB fetch.
-                                 # Four tickers in sequence still finish inside the 10:00 to 10:05 frozen window.
-CBOE_FAIL_COOLDOWN_S = 60        # After a Cboe failure, dashboard requests for that payload wait this long (or Retry-After,
-                                 # capped at CBOE_FAIL_COOLDOWN_MAX_S) before asking again; shared across processes on disk.
-                                 # Recorder runs ignore the cooldown (a missed 10:00 capture cannot be redone) but keep
-                                 # their own budget.
-CBOE_FAIL_COOLDOWN_MAX_S = 300
-CBOE_OI_SAME_MAX_FRAC = 0.01     # When at most 1% of the contracts both feeds report differ, Cboe carries Alpaca's
-                                 # OI vintage and takes Alpaca's dated OI date; above it Cboe is the newer file and its
-                                 # date is inferred as the most recent completed session before the payload day.
 
 # ---------------------------------------------------------------- window and refresh
 WINDOW_DAYS = 7                  # SPEC: expiries 0 to 7 calendar days.
@@ -193,27 +102,14 @@ GATE_GEX_MIN_PCT = 98.0          # Gate 1.2: valid contracts must hold >= 98% of
                                  # computable share (null) = invalid.
 OI_STALE_MAX_FRAC = 0.01         # Gate 1.3: at most 1% of the open interest inside GATE_OI_BAND may sit on contracts whose
                                  # OI is not dated the previous completed session (older, undated or mixed sources). Day 1
-                                 # showed why: QQQ's 10:00 capture used Alpaca OI dated Oct 15 on Oct 19 (two sessions old)
-                                 # and still passed. Cboe does not publish a date, so its date is INFERRED from the payload
-                                 # time (research policy, declared here): a payload stamped on the session day carries the
-                                 # previous session's OI. A payload with no time, or a time in the future, is not used.
+                                 # showed why: QQQ's 10:00 capture used OI dated Oct 15 on Oct 19 (two sessions old)
+                                 # and still passed. A vendor that does not publish an OI date has it INFERRED from the
+                                 # payload time (research policy, declared here).
 SPOT_MAX_AGE_S = 60              # SPEC: spot age <= 60 s, measured at completion AND against the valuation time.
 CLOCK_SKEW_S = 2                 # A vendor timestamp later than our completion clock by more than this is "future": rejected.
-QUOTE_SPOT_MAX_SKEW_S = 60       # An OPRA quote more than 60 s from the spot trade is not solved against that spot.
 CLOSED_QUOTE_AFTER_CLOSE_S = 960  # Market closed: the spot is the session close, and an OPRA closing quote may be stamped up to
                                  # 16 min after it (ETF and index options trade until 16:15 ET; verified 2026-10-17: SPY
                                  # quotes at 16:14:59). Such a quote is solved at the close; one older than 60 s before it is not.
-CLOSE_BAR_LOOKBACK_MIN = 15      # Fallback close (no daily bar): the last 1-minute bar ending at or before the close,
-                                 # searched over the final 15 minutes of the session.
-INDICATIVE_IV_MAX_AGE_S = 300    # An indicative IV is used only if its quote is at most 5 min older than the valuation
-                                 # time (the same tolerance the Cboe payload gets). Older = "iv_stale"; no quote time =
-                                 # "iv_time_unknown". Frozen and snapshot captures exclude both (never shared either);
-                                 # the live map shows unknown-age IV with a label and, outside market hours, stale IV too.
-OI_NULL_AMBIGUOUS_MAX_FRAC = 0.50  # Alpaca returns open_interest null, never 0, for a series with no OI on the OI date
-                                 # (verified 2026-10-17: 0 explicit zeros in 3,060 SPY and QQQ contracts). Null is read
-                                 # as zero only while the OI feed is healthy: of the series that traded on or before the
-                                 # OI date, at most this share may lack a record. Above it the feed is treated as broken
-                                 # and the nulls stay unknown (they count against coverage).
 
 # ---------------------------------------------------------------- option settlement (America/New_York)
 DEFAULT_SETTLE_PM = time(16, 0)  # SPEC: PM settlement 16:00 ET (early-close aware via the calendar).
@@ -226,8 +122,6 @@ BANNED_WORDS = ("buy", "sell", "bullish", "bearish", "signal", "entry", "should"
 ADV_SESSIONS = 20                # Average daily dollar volume over the last 20 completed regular sessions: one trading
                                  # month, long enough to smooth one heavy day, short enough to track a regime change.
 ADV_LOOKBACK_DAYS = 45           # Calendar days of daily bars requested to be sure 20 sessions are inside (holidays).
-ADV_FEED = "sip"                 # Dollar volume must be consolidated. IEX alone is a few percent of volume, so an IEX
-                                 # ADV would overstate the share roughly 30x: no SIP, no ADV (null with a reason).
 ADV_CACHE_FILE = ROOT / "data" / "cache" / "adv_daily.json"  # One entry per symbol, valid for one completed session.
 ADV_RETRY_S = 300                # After a failed ADV fetch, retry in 5 min, never on every 60 s map refresh.
 _NO_REF = "No free volume reference: index hedging trades mostly in ES and NQ futures"
@@ -240,9 +134,7 @@ PERCENTILE_MIN_HISTORY = 20      # No percentile until 20 eligible frozen captur
 ATR_SESSIONS = 14                # Typical day = simple mean true range of the last 14 completed regular sessions (the
                                  # common ATR length). Needs 15 daily bars: the first one only supplies a prior close.
 ATR_CACHE_FILE = ROOT / "data" / "cache" / "atr_daily.json"  # Same daily cache rule as ADV: one entry per completed session.
-ATR_ADJUSTMENT = "split"         # A split inside the window would read as a huge true range on raw bars. Split adjusted
-                                 # prices are right for a range; dividends are left alone (ADV stays raw dollars).
-ATR_FROM_ETF = {"SPX": "SPY", "NDX": "QQQ"}  # Alpaca has no index bars. ATR% is a percentage, so the ETF's ATR% is a
+ATR_FROM_ETF = {"SPX": "SPY", "NDX": "QQQ"}  # There are no index bars. ATR% is a percentage, so the ETF's ATR% is a
                                  # fair stand in for the index's (no units problem, unlike dollar volume). Labeled.
 
 # ---------------------------------------------------------------- context metrics (display only)
@@ -265,51 +157,11 @@ VOL_DRIFT_FLAT_REL = 0.05        # displayed (0.1 vol point), is below max(0.5 v
 VOL_DRIFT_DEMO_REF = FIXTURES_DIR / "vol_ref.json"   # Synthetic 09:45 references for demo mode.
 
 # ---------------------------------------------------------------- trade guidance
-GUIDANCE_MAX_DATA_AGE_S = 300   # Market open: no setups when the vendor's data time (spot trade, or the Cboe payload) is
+GUIDANCE_MAX_DATA_AGE_S = 300   # Market open: no setups when the vendor's data time (spot trade, or the payload) is
                                  # more than 5 min old, even if the last fetch "succeeded" (day-1 verification).
 GUIDANCE_MIN_RR = 1.0            # A scenario is shown only when the reward from the entry zone's worst edge to target 1
                                  # is at least the risk from that edge to the stop. Below 1 to 1 the
                                  # idea needs a hit rate above 50% to break even, which nothing here has measured.
-
-# ---------------------------------------------------------------- futures view (display transform only)
-# The Live Map's Futures view relabels levels as /ES or /MNQ equivalents. It never touches the GEX math, the levels,
-# the recorder, the frozen captures or the studies: every map number stays in index or ETF units, and the UI adds
-# the basis (and, for SPY and QQQ, the ETF to index ratio) at display time. gexlab/futures.py has the method.
-FUTURES = {                      # Index -> the futures it settles: /ES and /MES settle to the SPX special opening
-                                 # quotation on the quarterly expiry, /NQ and /MNQ to the NDX one, the same settlement
-                                 # as the AM settled monthly index options (root SPX, root NDX; not SPXW or NDXP).
-    "SPX": {"root": "ES", "symbol": "/ES", "also": ("/MES",), "option_root": "SPX",
-            "tolerance": 3.0},   # Override vs parity warning, in index points (3 ES points).
-    "NDX": {"root": "MNQ", "symbol": "/MNQ", "also": ("/NQ",), "option_root": "NDX",
-            "tolerance": 12.0},  # 3 ES points scaled by the NDX/SPX price ratio: 29,844 / 7,751 = 3.85 in the Cboe
-                                 # payloads of 2026-10-21 11:59 ET, so 11.6, rounded up to 12.
-}
-ETF_INDEX = {"SPY": "SPX", "QQQ": "NDX"}  # ETF levels convert to index points by the index/ETF price ratio first.
-FUTURES_MONTHS = {3: "H", 6: "M", 9: "U", 12: "Z"}  # Quarterly cycle and the exchange month codes.
-FUTURES_ROLL_DAYS = 4            # Roll rule: the front contract switches to the next quarter ON the roll date, CME's
-                                 # customary U.S. equity index roll: the Monday before the third Friday, 4 calendar days
-                                 # earlier (cmegroup.com/trading/equity-index/rolldates.html, read 2026-10-25). Counted
-                                 # from the third Friday, so a holiday that moves the expiry to Thursday does not move it.
-FUTURES_RATE = 0.0418            # r in the parity forward F = K + e^(rT) (C - P): the 13 week Treasury bill, coupon
-                                 # equivalent, 4.18% on 2026-10-20 (home.treasury.gov, Daily Treasury Bill Rates).
-                                 # Strikes are picked nearest the forward, where C - P is near 0, so r barely matters:
-                                 # on the Dec 2026 chains at 11:59 ET 2026-10-21, r = 0 instead moved F by 0.02 pt (SPX)
-                                 # and 0.10 pt (NDX).
-FUTURES_RATE_SOURCE = "13 week Treasury bill, coupon equivalent, 4.18% on 2026-10-20 (US Treasury)"
-FUTURES_PARITY_STRIKES = 6       # Strikes used: the 6 nearest the forward with usable call AND put mids (mid_usable,
-                                 # the same check the map uses). Median of the per-strike forwards.
-FUTURES_PARITY_MIN = 3           # Fewer usable strike pairs than this: the parity basis is unavailable, never a guess.
-FUTURES_PARITY_WARN_FRAC = 0.0005  # Warn when the per-strike forwards spread more than 0.05% of spot (SPX near 3.9 pt,
-                                 # NDX near 15 pt). Measured 2026-10-21 11:59 ET: SPX 0.07 pt, NDX 1.10 pt.
-FUTURES_STRIKE_BAND = 0.03       # Alpaca index (SPX): quarterly AM quotes fetched within 3% of spot for the parity basis.
-FUTURES_TICK = 0.25              # /ES, /MES, /NQ and /MNQ all tick 0.25 index points.
-FUTURES_RATIO_MAX_LAG_S = 90     # SPY/QQQ ratio: the ETF trade used must print within 90 s before the index value's time.
-FUTURES_BASIS_WINDOW_S = 300     # The parity basis shown is the median over the Cboe payloads of the last 5 minutes (by payload
-                                 # time), not one file. Measured 2026-10-21: two NDX payloads a minute apart (12:14:59 and
-                                 # 12:15:59 ET) gave 187.86 and 193.26, because NDX option spreads run 30 to 50 points and the
-                                 # per-strike forwards bounce about 4 points; SPX strikes agreed within 0.3. The true basis
-                                 # only decays with carry (about 0.7 point a day on Dec SPX), so 5 minutes loses nothing real.
-
 
 # ---------------------------------------------------------------- crypto (Deribit, model profile "crypto")
 # Crypto runs through the same engine as equities with a different market profile: 24/7 trading, one fixed

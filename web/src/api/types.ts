@@ -1,7 +1,7 @@
 // Typed shapes for the Edge GEX Lab API, contract v1.
 // Times are ISO 8601 UTC strings. GEX values are dollars of delta change per 1% move.
 
-export type FeedKind = "opra" | "indicative" | "cboe_delayed" | "demo";
+export type FeedKind = "deribit" | "okx" | "deribit+okx" | "demo" | string;
 export type Regime = "positive" | "negative" | "neutral";
 export type CaptureStatus = "eligible" | "late" | "invalid" | "missed" | "future";
 
@@ -20,12 +20,8 @@ export interface UpdateInfo {
 export interface Health {
   status: string;
   demo: boolean;
-  feeds: { alpaca_options: "opra" | "indicative" | null; stocks: "sip" | "iex" | null; cboe: boolean };
   market_open: boolean;
   last_frozen_capture: { ticker: string; date: string; status: CaptureStatus } | null;
-  rate: { used_last_min: number; cap: number };
-  // false when no Alpaca keys are set: SPY, QQQ and stocks cannot load, SPX and NDX still do
-  keys_configured?: boolean;
   // Newest frozen capture per pinned ticker, with its stored invalid-contract counts by reason.
   latest_captures?: {
     ticker: string;
@@ -43,7 +39,7 @@ export interface Health {
     invalid_counts: Record<string, number> | null;
   }[];
   calendar?: {
-    source: "alpaca" | "alpaca_cache" | "weekday_fallback" | "demo" | string;
+    source: "exchange" | "weekday_fallback" | "crypto_24x7" | "demo" | string;
     fetched_at: string | null;
     covered: [string, string] | null;
     degraded: boolean;
@@ -238,11 +234,10 @@ export interface VenueRow {
 export interface OiSource {
   kind: string | null;
   label: string | null;
-  /** inferred: Cboe date inferred as the prior session; matches_alpaca: Cboe numbers equal Alpaca's dated OI; reported: Alpaca. */
-  basis: "inferred" | "matches_alpaca" | "reported" | null;
+  /** inferred: date inferred as the prior session; reported: the vendor's own date. */
+  basis: "inferred" | "reported" | null;
   oi_date: string | null;
-  alpaca_oi_date: string | null;
-  /** set when Cboe OI was wanted but not used, with the reason */
+  /** set when the preferred OI was not used, with the reason */
   fallback_reason: string | null;
   matched: number | null;
   total: number | null;
@@ -254,15 +249,14 @@ export interface GexMap {
   ticker: string;
   as_of: string;
   model_version: string;
-  /** basis: last_trade (in session), regular_close (market closed: official session close), payload (Cboe),
-   *  prior_close (Cboe with the market open but the index value from before today's open; ts is the index's own time). */
+  /** basis: last_trade (in session), regular_close (market closed: official session close), payload,
+   *  prior_close (market open but the value is from before today's open). */
   spot: { price: number; ts: string; source: string; basis?: "last_trade" | "regular_close" | "payload" | "prior_close" | "parity" };
   /** The one clock T is measured from. label is set only when the market is closed. */
   valuation?: { ts: string; basis: "quote_time" | "session_close"; label: string | null };
   feed: { kind: FeedKind; label: string; stale: boolean; market_open: boolean; last_success: string | null; data_ts?: string | null };
   oi_date: string | null;
-  /** Open interest vendor (model 1.1). kind cboe for SPX/NDX and, unless Cboe failed, for SPY, QQQ and stocks; label is
-   *  "OI: Cboe (prior session, inferred)", "OI: Cboe (matches Alpaca, Oct 15)" or "OI: Alpaca (Oct 15)". null in demo. */
+  /** Open interest vendor (model 1.1): the venue that supplies it, with a label. null in demo. */
   oi_source?: OiSource | null;
   /** Crypto: one row per venue asked (Deribit, OKX) with its share of the window's |GEX|. */
   venues?: VenueRow[];
@@ -289,14 +283,14 @@ export interface GexMap {
   dex?: Dex | null;
   structure?: Structure | null;
   /** usable false: no valid contract within 10% of spot, so the levels are unavailable, not neutral or zero.
-   *  reason "no_live_quotes": no bid, ask or IV anywhere in the selection (Cboe's first minutes after the open). */
+   *  reason "no_live_quotes": no bid, ask or IV anywhere in the selection (a delayed feed's first minutes after the open). */
   quotes?: { usable: boolean; reason: "no_live_quotes" | "no_usable_contracts" | null; live: number };
   levels: MapLevels;
   profile_curve: { spot: number; net_gex: number }[];
   /** Crypto only: modeled dealer flow per price step (+ buy, - sell, dollars). null for equities. */
   hedge_flow?: HedgeFlow | null;
   frozen_today: FrozenToday | null;
-  /** SPX/NDX only (null otherwise): the index now, estimated from the live SPY/QQQ trade, because Cboe's value runs
+  /** SPX/NDX only (null otherwise): the index now, estimated from the live SPY/QQQ trade, because the index value runs
    *  about 15 minutes behind. The readings (regime ... at_flip) are present only when available and quotes are usable. */
   live_spot?: LiveSpot | null;
   /** Today's 10:00 frozen capture is missing, late or invalid: the reason in plain words. Null or absent when fine. */
@@ -430,7 +424,7 @@ export interface ReplaySnapshot {
   status?: CaptureStatus;
   status_reason?: string | null;
   spot_ts?: string | null;
-  index_ts?: string | null;   // SPX/NDX: the index value's own time (Cboe last_trade_time)
+  index_ts?: string | null;   // index chains: the index value's own time
   used?: boolean;
 }
 
@@ -568,11 +562,11 @@ export interface Scorecard {
     locked_at: string | null;
     capture_gate?: string;
     capture_gates?: Record<string, string>;
-    /** model/input version new captures are computed with, and the OI vendor policy (model 1.1: cboe) */
+    /** model/input version new captures are computed with, and the OI vendor policy (model 1.1) */
     model_version?: string;
     oi_source?: string;
     oi_source_note?: string;
-    /** true when the Study 1 sample mixes Alpaca-OI and Cboe-OI sessions */
+    /** true when the Study 1 sample mixes open interest vendors */
     mixed_oi_sources?: boolean;
   };
   study1: {
@@ -580,7 +574,7 @@ export interface Scorecard {
     sessions: number;
     /** eligible sessions by the gate that judged them, e.g. {"1.0": 1, "1.1": 2} */
     sessions_by_gate?: Record<string, number>;
-    /** eligible sessions by open interest vendor, e.g. {"alpaca": 1, "cboe": 4}; rows before the switch are read by feed */
+    /** eligible sessions by open interest vendor, e.g. {"okx": 1, "deribit": 4}; rows before the switch are read by feed */
     sessions_by_oi_source?: Record<string, number>;
     gate_sessions: number;
     families: { family: LevelFamily | string; gex?: boolean; first_touches: number; sessions_with_touch: number; gate: number | null; gate_sessions?: number | null }[];
@@ -596,88 +590,6 @@ export interface Scorecard {
   };
   lead: string;
   notes?: string[];
-}
-
-// ---------- GET /api/futures: the Futures view conversion (display only; the map is unchanged) ----------
-export interface FuturesContract {
-  index: "SPX" | "NDX";
-  symbol: string; // "/ESZ26"
-  also: string[]; // ["/MESZ26"]: same index, same price
-  month: string; // "2026-12"
-  label: string; // "Dec 2026"
-  expiry: string;
-  roll_date: string;
-  code: string; // "Z26"
-  settlement: string;
-  next?: FuturesContract;
-}
-export interface FuturesParity {
-  available: boolean;
-  reason: string | null;
-  /** True while Cboe's index value is the prior close (before about 09:45 ET): no basis is computed. */
-  prior_close?: boolean;
-  forward: number | null;
-  index_spot: number;
-  /** median of basis_raw over the payloads of the last few minutes (basis_window) */
-  basis: number | null;
-  /** this payload's F - index */
-  basis_raw: number | null;
-  basis_window: { payloads: number; seconds: number } | null;
-  rate: number;
-  rate_source: string;
-  t_years: number | null;
-  strikes: { strike: number; call_mid: number; put_mid: number; forward: number }[];
-  usable_pairs: number;
-  spread: number | null;
-  option_root: string;
-  /** alpaca: live parity spot and Alpaca quotes (SPX since 2026-11-20); cboe: the delayed Cboe file. */
-  source?: "alpaca" | "cboe";
-  option_expiry: string | null;
-  settlement: "AM";
-  as_of: string | null;
-  index_time: string | null;
-}
-export interface FuturesRatio {
-  value: number;
-  index_price: number;
-  index_time: string;
-  etf: string;
-  etf_price: number;
-  etf_time: string | null;
-  lag_s: number | null;
-  source: string;
-  note: string;
-}
-export interface FuturesOverride {
-  price: number;
-  index_value: number;
-  index_source: "live_etf_ratio" | "cboe_delayed" | "demo";
-  index_time: string | null;
-  delayed: boolean;
-  basis: number;
-  at: string | null;
-  label: string;
-}
-export interface FuturesView {
-  ticker: string;
-  index: "SPX" | "NDX";
-  etf: string | null;
-  available: boolean;
-  reason: string | null;
-  contract: FuturesContract;
-  parity: FuturesParity | null;
-  ratio: FuturesRatio | null;
-  override: FuturesOverride | null;
-  check: { diff: number | null; tolerance: number; warning: boolean } | null;
-  basis: { value: number; source: "parity" | "override"; label: string } | null;
-  /** futures = round to tick (level * ratio + basis). ratio is 1 for SPX and NDX. */
-  convert: { ratio: number; basis: number; tick: number } | null;
-  tick: number;
-  tolerance: number;
-  label: string;
-  warnings: string[];
-  as_of: string;
-  demo: boolean;
 }
 
 export interface Candle {

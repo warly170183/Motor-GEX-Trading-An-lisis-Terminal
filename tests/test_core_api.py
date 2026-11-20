@@ -22,14 +22,14 @@ DASHES = re.compile("[" + chr(0x2013) + chr(0x2014) + "]")   # en and em dash, b
 
 def test_health_and_tickers(client):
     h = client.get("/api/health").json()
-    assert h["status"] == "ok" and h["demo"] is True and h["rate"]["cap"] == 60
-    assert client.get("/api/tickers").json() == {"pinned": ["BTC", "ETH", "SOL", "TRX", "SUI", "EGLD", "SPY", "QQQ", "SPX", "NDX"]}
+    assert h["status"] == "ok" and h["demo"] is True and "rate" not in h and "feeds" not in h
+    assert client.get("/api/tickers").json() == {"pinned": ["BTC", "ETH", "SOL", "TRX", "SUI", "EGLD"]}
 
 
 def test_search(client):
-    r = client.get("/api/search", params={"q": "nvd"}).json()
-    assert r[0]["symbol"] == "NVDA" and r[0]["source"] == "alpaca"
-    assert client.get("/api/search", params={"q": "nasdaq"}).json()[0]["symbol"] == "NDX"
+    r = client.get("/api/search", params={"q": "bit"}).json()
+    assert r[0]["symbol"] == "BTC" and r[0]["source"] == "deribit"
+    assert client.get("/api/search", params={"q": "nvd"}).json() == []
     assert client.get("/api/search", params={"q": ""}).json() == []
 
 

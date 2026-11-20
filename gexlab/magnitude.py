@@ -5,9 +5,9 @@ each 1% move. A raw dollar figure is not comparable across tickers, so the map a
 as a share of the underlying's average daily dollar volume (ADV) and, once enough history
 exists, as a percentile among this ticker's own eligible 10:00 frozen captures.
 
-ADV = mean of v * vw (Alpaca daily SIP bars: volume times the bar VWAP) over the last
-ADV_SESSIONS completed regular sessions. Cached per symbol per completed session, in memory
-and on disk. REST only, never a websocket.
+ADV = mean of v * vw (daily bars: volume times the bar VWAP) over the last ADV_SESSIONS completed
+sessions. Cached per symbol per completed session, in memory and on disk. Crypto reads Deribit's
+perpetual daily bars (public REST); demo mode reads fixtures.
 
 SPX and NDX have no volume reference. Index options have no share volume, and the hedging mostly
 trades in ES and NQ futures, which have no free data source. Scaling SPY or QQQ dollar volume by the
@@ -16,8 +16,7 @@ of ADV is null with adv_basis "none" and a plain sentence; the dollar rows and p
 
 Two more views of the same number:
 - per typical day: the hedge for a 1-ATR move, abs(net) x ATR%, where ATR% is the simple mean true
-  range of the last ATR_SESSIONS completed sessions over spot (split adjusted SIP daily bars, cached
-  daily like ADV). SPX/NDX use SPY/QQQ's ATR% (a percentage, so no units problem), labeled.
+  range of the last ATR_SESSIONS completed sessions over spot (daily bars, cached daily like ADV). SPX/NDX use SPY/QQQ's ATR% (a percentage, so no units problem), labeled.
 - gross: abs(call GEX) + abs(put GEX) of the same expiries, and net as a share of it.
 """
 from __future__ import annotations
@@ -45,7 +44,7 @@ EXPLAINER = ("Net GEX estimates how many dollars of the underlying dealers would
 PER_ATR_METHOD = ("Linear: the hedge per 1% times the ATR in percent. ATR is the simple mean true range of the last "
                   "14 completed sessions, divided by spot (SPX and NDX: the ETF's last close). Gamma changes as price "
                   "moves, so this is a rough size for a typical day, not a forecast.")
-ATR_FROM_ETF_NOTE = ("Alpaca has no index bars, so {index} uses {etf}'s 14-session ATR as a percent of {etf}'s last "
+ATR_FROM_ETF_NOTE = ("There are no index bars, so {index} uses {etf}'s 14-session ATR as a percent of {etf}'s last "
                      "close. A percentage carries over from the ETF to the index; dollar volume does not.")
 GROSS_NOTE = ("Gross adds call GEX and put GEX without signs, same expiries. Net to gross near 100% means one side "
               "dominates. A low ratio means calls and puts largely offset each other: check the Unsigned view to see "
@@ -77,7 +76,7 @@ def last_completed_session(cal: TradingCalendar, now: datetime) -> date:
 
 
 def adv_from_bars(bars: list[dict], last_completed: date, n: int | None = None) -> dict:
-    """Average daily dollar volume from Alpaca daily bars ({t, v, vw}).
+    """Average daily dollar volume from daily bars ({t, v, vw}).
 
     Uses the newest n bars dated on or before last_completed (a partial bar for a session still
     trading is never used). Fewer than n usable bars gives adv_usd None and a reason."""
@@ -163,16 +162,8 @@ def _write_disk(path: Path, symbol: str, entry: dict) -> None:
 
 
 def fetch_daily_bars(symbol: str, start: date, end: date, adjustment: str = "raw") -> list[dict]:
-    """Alpaca daily SIP bars. raw for ADV (v * vw is the dollars actually traded), split for ATR."""
-    from gexlab.sources.alpaca import AlpacaSource
-    src = AlpacaSource(priority="low", who="adv")
-    r = src._get(f"{config.ALPACA_DATA_BASE}/v2/stocks/{symbol}/bars",
-                 {"feed": config.ADV_FEED, "timeframe": "1Day", "start": start.isoformat(),
-                  "end": end.isoformat(), "limit": 100, "adjustment": adjustment})
-    if r.status_code != 200:
-        raise SourceError(f"daily {config.ADV_FEED.upper()} bars for {symbol}: HTTP {r.status_code}",
-                          status=r.status_code)
-    return r.json().get("bars") or []
+    """No live volume source exists for anything but crypto (see fetch_daily_bars_crypto)."""
+    raise SourceError(f"no daily bars source for {symbol}: only crypto has a live volume reference")
 
 
 def _cached_daily(kind: str, symbol: str, last_completed: date, *, value_key: str, what: str,
@@ -204,7 +195,7 @@ def _cached_daily(kind: str, symbol: str, last_completed: date, *, value_key: st
         with _LOCK:
             _FAIL[ck] = (clock(), reason)
         return {value_key: None, "as_of_session": key, "reason": reason}
-    entry = {"symbol": symbol, "as_of_session": key, "source": source or f"alpaca_{config.ADV_FEED}_daily",
+    entry = {"symbol": symbol, "as_of_session": key, "source": source or "daily_bars",
              "fetched_at": iso_z(utc_now()), **res}
     if entry[value_key] is None:
         with _LOCK:
@@ -227,17 +218,13 @@ def get_adv(symbol: str, last_completed: date, *,
                          path=cache_path or config.ADV_CACHE_FILE, clock=clock, source=source)
 
 
-def _fetch_split_adjusted(symbol: str, start: date, end: date) -> list[dict]:
-    return fetch_daily_bars(symbol, start, end, adjustment=config.ATR_ADJUSTMENT)
-
-
 def get_atr(symbol: str, last_completed: date, *,
             fetch: Callable[[str, date, date], list[dict]] | None = None,
             cache_path: Path | None = None, clock: Callable[[], float] = _time.time,
             source: str | None = None) -> dict:
-    """ATR entry for symbol as of last_completed (split adjusted daily bars), cached like ADV."""
+    """ATR entry for symbol as of last_completed (daily bars), cached like ADV."""
     return _cached_daily("atr", symbol, last_completed, value_key="atr_usd", what="daily range",
-                         fetch=fetch or _fetch_split_adjusted, compute=atr_from_bars,
+                         fetch=fetch or fetch_daily_bars, compute=atr_from_bars,
                          path=cache_path or config.ATR_CACHE_FILE, clock=clock, source=source)
 
 

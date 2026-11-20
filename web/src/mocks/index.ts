@@ -28,32 +28,32 @@ interface TickerCfg {
   spot: number;
   step: number;
   round: number;
-  feed: "opra" | "cboe_delayed";
+  feed: "demo" | "demo_index";
   oiScale: number;
   name: string;
 }
 
 const CFG: Record<string, TickerCfg> = {
-  SPY: { spot: 758.42, step: 1, round: 5, feed: "opra", oiScale: 1, name: "SPDR S&P 500 ETF" },
-  QQQ: { spot: 612.36, step: 1, round: 5, feed: "opra", oiScale: 0.55, name: "Invesco QQQ Trust" },
-  SPX: { spot: 7604.1, step: 5, round: 25, feed: "cboe_delayed", oiScale: 0.08, name: "S&P 500 Index" },
-  NDX: { spot: 26141.5, step: 25, round: 100, feed: "cboe_delayed", oiScale: 0.006, name: "Nasdaq 100 Index" },
-  NVDA: { spot: 188.64, step: 2.5, round: 10, feed: "opra", oiScale: 0.7, name: "NVIDIA Corp" },
+  SPY: { spot: 758.42, step: 1, round: 5, feed: "demo", oiScale: 1, name: "SPDR S&P 500 ETF" },
+  QQQ: { spot: 612.36, step: 1, round: 5, feed: "demo", oiScale: 0.55, name: "Invesco QQQ Trust" },
+  SPX: { spot: 7604.1, step: 5, round: 25, feed: "demo_index", oiScale: 0.08, name: "S&P 500 Index" },
+  NDX: { spot: 26141.5, step: 25, round: 100, feed: "demo_index", oiScale: 0.006, name: "Nasdaq 100 Index" },
+  NVDA: { spot: 188.64, step: 2.5, round: 10, feed: "demo", oiScale: 0.7, name: "NVIDIA Corp" },
 };
 
 const UNIVERSE: SearchHit[] = [
-  { symbol: "NVDA", name: "NVIDIA Corp", source: "alpaca" },
-  { symbol: "NFLX", name: "Netflix Inc", source: "alpaca" },
-  { symbol: "NVO", name: "Novo Nordisk A/S", source: "alpaca" },
-  { symbol: "NKE", name: "Nike Inc", source: "alpaca" },
-  { symbol: "AAPL", name: "Apple Inc", source: "alpaca" },
-  { symbol: "AMD", name: "Advanced Micro Devices", source: "alpaca" },
-  { symbol: "AMZN", name: "Amazon.com Inc", source: "alpaca" },
-  { symbol: "TSLA", name: "Tesla Inc", source: "alpaca" },
-  { symbol: "META", name: "Meta Platforms Inc", source: "alpaca" },
-  { symbol: "MSFT", name: "Microsoft Corp", source: "alpaca" },
-  { symbol: "IWM", name: "iShares Russell 2000 ETF", source: "alpaca" },
-  { symbol: "SMH", name: "VanEck Semiconductor ETF", source: "alpaca" },
+  { symbol: "NVDA", name: "NVIDIA Corp", source: "demo" },
+  { symbol: "NFLX", name: "Netflix Inc", source: "demo" },
+  { symbol: "NVO", name: "Novo Nordisk A/S", source: "demo" },
+  { symbol: "NKE", name: "Nike Inc", source: "demo" },
+  { symbol: "AAPL", name: "Apple Inc", source: "demo" },
+  { symbol: "AMD", name: "Advanced Micro Devices", source: "demo" },
+  { symbol: "AMZN", name: "Amazon.com Inc", source: "demo" },
+  { symbol: "TSLA", name: "Tesla Inc", source: "demo" },
+  { symbol: "META", name: "Meta Platforms Inc", source: "demo" },
+  { symbol: "MSFT", name: "Microsoft Corp", source: "demo" },
+  { symbol: "IWM", name: "iShares Russell 2000 ETF", source: "demo" },
+  { symbol: "SMH", name: "VanEck Semiconductor ETF", source: "demo" },
 ];
 
 function cfg(t: string): TickerCfg {
@@ -61,7 +61,7 @@ function cfg(t: string): TickerCfg {
   let h = 0;
   for (const c of t) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   const spot = 40 + (h % 400) + 0.37;
-  return { spot, step: spot > 200 ? 5 : 2.5, round: 10, feed: "opra", oiScale: 0.3, name: t };
+  return { spot, step: spot > 200 ? 5 : 2.5, round: 10, feed: "demo", oiScale: 0.3, name: t };
 }
 
 function rng(seed: number) {
@@ -260,7 +260,7 @@ function buildMap(ticker: string, expiries: string[], signed: boolean): GexMap {
   } else {
     lead = `Unsigned view: ${ticker} at ${S.toFixed(2)}, largest gamma at ${fmtStrike(callWall)}. Built from ${pctv}% of the selected chain.`;
   }
-  const isIndex = c.feed === "cboe_delayed";
+  const isIndex = c.feed === "demo_index";
   const oiDate = PRIOR;
   const warnings = [`OI is from ${monthDay(oiDate)} (one session behind).`];
   if (isIndex) warnings.push("Index quotes are delayed about 15 minutes. Spot is the delayed index level.");
@@ -280,21 +280,20 @@ function buildMap(ticker: string, expiries: string[], signed: boolean): GexMap {
     ticker,
     as_of: stamp,
     model_version: "1.1",
-    spot: { price: S, ts: stamp, source: isIndex ? "cboe" : "alpaca_sip" },
+    spot: { price: S, ts: stamp, source: "demo" },
     feed: {
-      kind: isIndex ? "cboe_delayed" : "opra",
-      label: isIndex ? "Cboe delayed quotes (about 15 min)" : "OPRA quotes, refreshed 60s",
+      kind: "demo",
+      label: "Synthetic fixture",
       stale: false,
       market_open: true,
       last_success: stamp,
     },
     oi_date: oiDate,
     oi_source: {
-      kind: "cboe",
-      label: "OI: Cboe (prior session, inferred)",
+      kind: "demo",
+      label: "OI: synthetic fixture",
       basis: "inferred",
       oi_date: oiDate,
-      alpaca_oi_date: isIndex ? null : oiDate,
       fallback_reason: null,
       matched: isIndex ? null : 2412,
       total: isIndex ? null : 2412,
@@ -388,7 +387,7 @@ function mockMagnitude(ticker: string, netSigned: number, _spot: number, callGex
       atr_basis: etf ? "etf" : "own",
       atr_pct_basis: etf ? "etf_close" : "spot",
       atr_label: etf ? `ATR% from ${etf}` : `${ticker}'s 14-session ATR`,
-      atr_note: etf ? `Alpaca has no index bars, so ${ticker} uses ${etf}'s 14-session ATR as a percent of ${etf}'s last close. A percentage carries over from the ETF to the index; dollar volume does not.` : null,
+      atr_note: etf ? `There are no index bars, so ${ticker} uses ${etf}'s 14-session ATR as a percent of ${etf}'s last close. A percentage carries over from the ETF to the index; dollar volume does not.` : null,
       atr_sessions: 14,
       atr_window: { first: "2026-09-25", last: "2026-10-15" },
       atr_source: "demo",
@@ -855,7 +854,7 @@ const MOCK_PROTOCOL = {
   locked_at: "2026-10-19",
   capture_gate: "1.2",
   model_version: "1.1",
-  oi_source: "cboe",
+  oi_source: "demo",
   mixed_oi_sources: true,
   capture_gates: {
     "1.0": "usable OI and IV on >= 95% of contracts within 10% of spot (contract count)",
@@ -893,7 +892,7 @@ function scorecard(): Scorecard {
         ticker: "SPY",
         sessions: 12,
         sessions_by_gate: { "1.0": 10, "1.1": 1, "1.2": 1 },
-        sessions_by_oi_source: { alpaca: 11, cboe: 1 },
+        sessions_by_oi_source: { demo: 12 },
         gate_sessions: 40,
         families: families.map(([f, n]) => fam(f, n, Math.min(12, n))),
         passed: false,
@@ -975,10 +974,8 @@ export async function mockFetch(path: string, init?: RequestInit): Promise<unkno
       const h: Health = {
         status: "ok",
         demo: true,
-        feeds: { alpaca_options: "opra", stocks: "sip", cboe: true },
         market_open: true,
         last_frozen_capture: { ticker: "SPY", date: SESSION, status: "eligible" },
-        rate: { used_last_min: 7, cap: 60 },
       };
       return h;
     }
@@ -1035,8 +1032,6 @@ export async function mockFetch(path: string, init?: RequestInit): Promise<unkno
     }
     case "/api/scorecard":
       return scorecard();
-    case "/api/futures":
-      throw new Error("The mock build has no Futures view: run the API with GEXLAB_DEMO=1 for a synthetic one");
     default:
       throw new Error(`Mock has no route for ${url.pathname}`);
   }

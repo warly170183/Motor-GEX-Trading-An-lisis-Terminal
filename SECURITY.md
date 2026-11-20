@@ -32,9 +32,8 @@ Please avoid publicly disclosing the vulnerability until it has been reviewed an
 
 Edge GEX Lab works with potentially sensitive information including:
 
-- Alpaca API keys in `.env`
 - The local `claude` CLI call behind "Explain this map" (it must stay tool-free and keyless)
-- Network calls to Alpaca and Cboe (REST only; the app must never place an order or open a websocket)
+- Network calls to the crypto venues (REST only; the app must never place an order or open a websocket)
 
 Reports involving exposure of this information, unauthorized access, credential handling, unexpected network communication, or unsafe file handling are particularly important.
 
@@ -44,7 +43,7 @@ Edge GEX Lab is designed as a local-first application. The server binds to `127.
 
 Users should never commit API keys, `.env` files, local caches, or other private data to the repository.
 
-API credentials should only be stored using the configuration methods documented by the project.
+The app needs no API credentials.
 
 ## Responsible Disclosure
 

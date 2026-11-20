@@ -25,18 +25,18 @@ if errorlevel 1 (
     goto :fail
 )
 
-echo [1/5] Creating the Python environment in .venv
+echo [1/4] Creating the Python environment in .venv
 if not exist ".venv\Scripts\python.exe" (
     python -m venv .venv
     if errorlevel 1 goto :fail
 )
 
-echo [2/5] Installing the Python packages
+echo [2/4] Installing the Python packages
 ".venv\Scripts\python.exe" -m pip install --quiet --upgrade pip
 ".venv\Scripts\python.exe" -m pip install --quiet -r requirements.txt
 if errorlevel 1 goto :fail
 
-echo [3/5] Installing the web packages (a minute the first time)
+echo [3/4] Installing the web packages (a minute the first time)
 pushd web
 call npm ci --no-audit --no-fund --loglevel=error
 if errorlevel 1 (
@@ -49,7 +49,7 @@ if errorlevel 1 (
     )
 )
 
-echo [4/5] Building the web page
+echo [4/4] Building the web page
 call npm run build --silent
 if errorlevel 1 (
     popd
@@ -57,17 +57,9 @@ if errorlevel 1 (
 )
 popd
 
-echo [5/5] Creating .env for your Alpaca keys
-if exist ".env" (
-    echo       .env already exists, left as it is
-) else (
-    copy ".env.example" ".env" >nul
-    echo       Created. Open .env and paste your Alpaca key and secret. SPX and NDX work without them.
-)
-
 echo.
 echo Setup finished. Start it with launch.bat, then open http://127.0.0.1:8240
-echo Without Alpaca keys it opens on SPX, which needs none.
+echo It opens on BTC and needs no keys.
 echo A new install starts empty: no saved maps and no history.
 echo.
 pause

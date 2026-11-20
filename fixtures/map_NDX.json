@@ -2567,7 +2567,7 @@
    "atr_basis": "etf",
    "atr_pct_basis": "etf_close",
    "atr_label": "ATR% from QQQ",
-   "atr_note": "Alpaca has no index bars, so NDX uses QQQ's 14-session ATR as a percent of QQQ's last close. A percentage carries over from the ETF to the index; dollar volume does not.",
+   "atr_note": "There are no index bars, so NDX uses QQQ's 14-session ATR as a percent of QQQ's last close. A percentage carries over from the ETF to the index; dollar volume does not.",
    "atr_sessions": 14,
    "atr_window": {
     "first": "2026-09-25",

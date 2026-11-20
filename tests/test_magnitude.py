@@ -247,7 +247,7 @@ def test_atr_ignores_a_partial_session_and_needs_15_bars():
 
 # ---------------------------------------------------------------- ATR cache
 
-def test_atr_fetched_once_per_session_split_adjusted_and_separate_from_adv(tmp_path, monkeypatch):
+def test_atr_fetched_once_per_session_and_separate_from_adv(tmp_path, monkeypatch):
     seen = []
 
     def fake(sym, start, end, adjustment="raw"):
@@ -258,7 +258,7 @@ def test_atr_fetched_once_per_session_split_adjusted_and_separate_from_adv(tmp_p
     atr_path, adv_path = tmp_path / "atr.json", tmp_path / "adv.json"
     a = M.get_atr("tsla", last, cache_path=atr_path)
     b = M.get_atr("TSLA", last, cache_path=atr_path)
-    assert a["atr_usd"] == b["atr_usd"] == pytest.approx(2.0) and seen == [("TSLA", "split")]
+    assert a["atr_usd"] == b["atr_usd"] == pytest.approx(2.0) and seen == [("TSLA", "raw")]
     M.get_adv("TSLA", last, cache_path=adv_path)           # ADV keeps raw bars and its own cache entry
     assert seen[-1] == ("TSLA", "raw") and len(seen) == 2
     M.reset_cache()                                         # restart: disk answers, no refetch

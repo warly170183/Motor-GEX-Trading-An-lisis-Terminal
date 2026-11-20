@@ -1,7 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { GexMap, StrikeRow } from "../api/types";
 import { distText, gex, int, px, price as fmtPrice, spotRef, strike as fmtStrike } from "../lib/format";
-import { futPx, toFut, type FutConv } from "../lib/futures";
 import { useMeasure } from "../lib/hooks";
 import { spotOf } from "../lib/live";
 
@@ -23,7 +22,6 @@ interface Props {
   height: number;
   present: boolean;
   /** Futures view: level tags show the futures equivalent (the strike axis stays in index or ETF units). */
-  fut?: FutConv | null;
 }
 
 const C = {
@@ -75,7 +73,7 @@ type Tag = {
   split?: { fill: string; ink: string }; // two-tone tag: label on `fill`, value on `split.fill`
 };
 
-export default function GexProfile({ map, levels, rangePct, showCurve, frozen, height, present, fut = null }: Props) {
+export default function GexProfile({ map, levels, rangePct, showCurve, frozen, height, present }: Props) {
   const [wrapRef, size] = useMeasure<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null); // index into visible strikes
   const [curveHover, setCurveHover] = useState<number | null>(null); // index into visible curve points
@@ -109,8 +107,8 @@ export default function GexProfile({ map, levels, rangePct, showCurve, frozen, h
 
   // ---- level tags (built first: their width sets the right margin)
   const tags: Tag[] = [];
-  const at10 = (frozen ? " 10:00" : "") + (fut ? ` ${fut.root}` : "");
-  const fw = (v: number, plain: string) => (fut ? futPx(toFut(v, fut)) : plain);
+  const at10 = frozen ? " 10:00" : "";
+  const fw = (_v: number, plain: string) => plain;
   const shared = levels.call_wall !== null && levels.call_wall === levels.put_wall;
   if (shared && inRange(levels.call_wall)) {
     tags.push({
@@ -132,7 +130,7 @@ export default function GexProfile({ map, levels, rangePct, showCurve, frozen, h
   }
   if (map.signed && inRange(levels.nearest_zero_gamma))
     tags.push({ key: "zg", y: y(levels.nearest_zero_gamma), label: `GAMMA FLIP${at10}`, value: fw(levels.nearest_zero_gamma, px(levels.nearest_zero_gamma, map.ticker)), fill: "#000", ink: C.zero, stroke: C.zero, line: C.zero, dash: "2 3", w: 1.5 });
-  if (spot >= lo && spot <= hi) tags.push({ key: "sp", y: y(spot), label: fut ? `SPOT ${fut.root}` : "SPOT", value: fw(spot, px(spot, map.ticker)), fill: C.spot, ink: "#000", line: C.spot, dash: "5 4", w: 1.2 });
+  if (spot >= lo && spot <= hi) tags.push({ key: "sp", y: y(spot), label: "SPOT", value: fw(spot, px(spot, map.ticker)), fill: C.spot, ink: "#000", line: C.spot, dash: "5 4", w: 1.2 });
 
   const labelW = (t: Tag) => t.label.length * 0.68 * F.tagLabel;
   const valueW = (t: Tag) => t.value.length * 0.62 * F.tagValue;
@@ -387,7 +385,7 @@ export default function GexProfile({ map, levels, rangePct, showCurve, frozen, h
             <g key={`z${z}`}>
               <line x1={L} x2={TR} y1={y(z)} y2={y(z)} stroke={C.zero} strokeDasharray="2 4" opacity={0.35} />
               <text x={L + 4} y={y(z) - 4} fill={C.zero} opacity={0.6} fontSize={F.faint} fontFamily="JetBrains Mono">
-                gamma flip {fut ? `${fut.root} ${futPx(toFut(z, fut))}` : fmtPrice(z)}
+                gamma flip {fmtPrice(z)}
               </text>
             </g>
           ))}

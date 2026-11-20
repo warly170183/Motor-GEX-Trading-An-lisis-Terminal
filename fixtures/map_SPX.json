@@ -1479,7 +1479,7 @@
    "atr_basis": "etf",
    "atr_pct_basis": "etf_close",
    "atr_label": "ATR% from SPY",
-   "atr_note": "Alpaca has no index bars, so SPX uses SPY's 14-session ATR as a percent of SPY's last close. A percentage carries over from the ETF to the index; dollar volume does not.",
+   "atr_note": "There are no index bars, so SPX uses SPY's 14-session ATR as a percent of SPY's last close. A percentage carries over from the ETF to the index; dollar volume does not.",
    "atr_sessions": 14,
    "atr_window": {
     "first": "2026-09-25",

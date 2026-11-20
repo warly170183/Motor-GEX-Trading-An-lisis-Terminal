@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "../api/client";
-import type { Dex, Expiration, FuturesView, GexMap, Magnitude, SearchHit, VolDrift } from "../api/types";
+import type { Dex, Expiration, GexMap, Magnitude, SearchHit, VolDrift } from "../api/types";
 import GexProfile, { type ProfileLevels } from "../components/GexProfile";
 import GuidancePanel from "../components/GuidancePanel";
 import { Drawer, ErrorState, Icon, Lead, Panel, Seg, Skeleton, usePresent, useTopMeta } from "../components/ui";
 import { GEX_UNITS, clockLabel, dayFull, dayShort, distText, gex, int, isCrypto, nyDay, nyTime, nyToday, pct, price, px, setClockForTicker, signed as signedNum, spotRef, strike } from "../lib/format";
 import { CURRENT_GATE, gateMin } from "../lib/gate";
-import FuturesPanel from "../components/FuturesPanel";
-import { FUTURES_TICKERS, convOf, futPx, toFut, type FutConv, type StoredOverride } from "../lib/futures";
 import { useAsync, useNow } from "../lib/hooks";
 import { liveOf, spotOf } from "../lib/live";
 
@@ -73,46 +71,15 @@ function unsignedLead(m: GexMap): string {
   return `Unsigned exposure: ${m.ticker} at ${px(m.spot.price, m.ticker)}${where}, total absolute GEX ${gex(total)}. ${UNSIGNED_NOTE}`;
 }
 
-/** Method drawer: which vendor's open interest the map uses and how its date was set (model 1.1). */
+/** Method drawer: which vendor's open interest the map uses (live from the venues' public APIs). */
 function oiSourceText(m: GexMap): string {
   const o = m.oi_source;
   if (!o || !o.label) return "Synthetic fixture.";
-  const alp = o.alpaca_oi_date ? dayShort(o.alpaca_oi_date) : null;
-  if (o.kind === "occ") {
-    const head = `${o.label}. Quotes, spot and IV come from Alpaca; open interest comes from OCC, the options clearing house, joined by OCC symbol (${o.matched ?? "?"} of ${o.total ?? "?"} contracts).`;
-    if (o.basis === "matches_alpaca") return `${head} OCC's numbers match Alpaca's, so they carry Alpaca's date${alp ? ` (${alp})` : ""}.`;
-    return `${head} OCC prints no OI date; its numbers differ from Alpaca's${alp ? ` (dated ${alp})` : ""}, so it is read as the newer file and dated the most recent completed session before the download's day.`;
-  }
-  if (o.kind === "cboe" && m.feed.kind === "cboe_delayed")
-    return `${o.label}. The whole chain comes from Cboe's delayed payload, which does not publish an OI date; it is shown as the session before the payload's day.`;
-  if (o.kind === "cboe") {
-    const head = `${o.label}. Quotes, spot and IV come from Alpaca; open interest comes from Cboe's delayed payload, joined by OCC symbol (${o.matched ?? "?"} of ${o.total ?? "?"} contracts).`;
-    if (o.basis === "matches_alpaca") return `${head} Cboe's numbers match Alpaca's, so they carry Alpaca's date${alp ? ` (${alp})` : ""}.`;
-    return `${head} Cboe publishes no OI date; its numbers differ from Alpaca's${alp ? ` (dated ${alp})` : ""}, so it is read as the newer file and dated the most recent completed session before the payload's day.`;
-  }
-  return `${o.label}. Open interest from Alpaca's contracts endpoint, with the date Alpaca reports.${o.fallback_reason ? ` The fresher open interest file was not used: ${o.fallback_reason}.` : ""}`;
-}
-
-// Index or Futures prices: remembered per browser. Storage can be blocked, so every access is guarded.
-type PriceView = "index" | "futures";
-const PRICE_VIEW_KEY = "gexlab.priceView";
-function readPriceView(): PriceView {
-  try {
-    return window.localStorage.getItem(PRICE_VIEW_KEY) === "futures" ? "futures" : "index";
-  } catch {
-    return "index";
-  }
-}
-function writePriceView(v: PriceView) {
-  try {
-    window.localStorage.setItem(PRICE_VIEW_KEY, v);
-  } catch {
-    /* storage blocked: the choice still holds for this page view */
-  }
+  return `${o.label}. Open interest comes live from the same public API as the quotes.`;
 }
 
 // Recent searches: the last tickers picked from the search box, newest first, as chips beside it. Per browser,
-// guarded like the price view.
+// guarded like every other localStorage read.
 const RECENT_KEY = "gexlab.recentTickers";
 const RECENT_MAX = 6;
 function readRecent(): string[] {
@@ -130,9 +97,6 @@ function writeRecent(v: string[]) {
     /* storage blocked: the list still holds for this page view */
   }
 }
-// Typed futures prices are kept per index (SPY shares SPX's, QQQ NDX's) for this page view only.
-const FUT_INDEX: Record<string, string> = { SPY: "SPX", QQQ: "NDX", SPX: "SPX", NDX: "NDX" };
-
 export default function LiveMap({ initialTicker, onTicker }: { initialTicker: string; onTicker: (t: string) => void }) {
   const present = usePresent();
   const [ticker, setTicker] = useState(initialTicker);
@@ -146,12 +110,6 @@ export default function LiveMap({ initialTicker, onTicker }: { initialTicker: st
   const [paused, setPaused] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
-  const [priceView, setPriceViewState] = useState<PriceView>(readPriceView);
-  const setPriceView = (v: PriceView) => {
-    setPriceViewState(v);
-    writePriceView(v);
-  };
-  const [overrides, setOverrides] = useState<Record<string, StoredOverride>>({});
 
   const tickers = useAsync(() => api.tickers(), []);
   const pinned = tickers.data?.pinned ?? ["BTC", "ETH", "SPY", "QQQ", "SPX", "NDX"];
@@ -197,23 +155,6 @@ export default function LiveMap({ initialTicker, onTicker }: { initialTicker: st
 
   const m = map.data && map.data.ticker === ticker ? map.data : null;
 
-  // Futures view: a display transform. The map stays in index or ETF units; /api/futures returns the basis (and the
-  // ETF ratio) and every shown level is round_to_tick(level * ratio + basis). Fetched again with each map refresh.
-  const futOk = FUTURES_TICKERS.has(ticker);
-  const futOn = priceView === "futures" && futOk;
-  const ov = overrides[FUT_INDEX[ticker] ?? ticker] ?? null;
-  const futQ = useAsync<FuturesView>(() => api.futures(ticker, { overrideBasis: ov?.basis }), [ticker, map.data, ov?.basis], futOn && m !== null);
-  const futData = futOn && futQ.data && futQ.data.ticker === ticker ? futQ.data : null;
-  const conv = futOn ? convOf(futData) : null;
-  const exact = m ? { spot: spotOf(m), flips: m.levels.zero_gamma } : null;   // guidance reads at the live spot too
-  const setOverride = (o: StoredOverride | null) =>
-    setOverrides((cur) => {
-      const k = FUT_INDEX[ticker] ?? ticker;
-      const next = { ...cur };
-      if (o) next[k] = o;
-      else delete next[k];
-      return next;
-    });
   const expsFor = exps.data && exps.data.ticker === ticker ? exps.data : null;
   const noExpiries = expsFor !== null && expsFor.expirations.length === 0;
   const fatal: Error | null = !m ? (map.error ?? (exps.error && !expsFor ? exps.error : null)) : null;
@@ -280,7 +221,7 @@ export default function LiveMap({ initialTicker, onTicker }: { initialTicker: st
           {m.oi_source?.label ? (
             <>
               <span className="sep hide-sm" />
-              <span className="hide-sm" title={m.oi_source.fallback_reason ? `Cboe open interest not used: ${m.oi_source.fallback_reason}` : undefined}>
+              <span className="hide-sm" title={m.oi_source.fallback_reason ? `Preferred open interest not used: ${m.oi_source.fallback_reason}` : undefined}>
                 <b style={m.oi_source.fallback_reason ? { color: "var(--amber)" } : undefined}>{m.oi_source.label}</b>
               </span>
             </>
@@ -399,7 +340,7 @@ export default function LiveMap({ initialTicker, onTicker }: { initialTicker: st
       }
     >
       {m && levels ? (
-        <GexProfile map={m} levels={levels} rangePct={rangePct} showCurve={curveOn} frozen={showFrozen} height={chartH} present={present} fut={conv} />
+        <GexProfile map={m} levels={levels} rangePct={rangePct} showCurve={curveOn} frozen={showFrozen} height={chartH} present={present} />
       ) : (
         <ProfileSkeleton height={chartH} />
       )}
@@ -511,22 +452,6 @@ export default function LiveMap({ initialTicker, onTicker }: { initialTicker: st
             { value: "unsigned", label: "Unsigned", title: "Every contract counts by size. Shows where gamma sits, not its direction." },
           ]}
         />
-        <Seg<PriceView>
-          label="Price units"
-          value={futOn ? "futures" : "index"}
-          onChange={setPriceView}
-          options={[
-            { value: "index", label: "Index", title: `Levels in ${ticker} units, as computed` },
-            {
-              value: "futures",
-              label: "Futures",
-              disabled: !futOk,
-              title: futOk
-                ? `Levels as ${FUT_INDEX[ticker] === "NDX" ? "/MNQ" : "/ES"} equivalents: an estimate from the option chain, rounded to the 0.25 tick`
-                : "Futures view: SPX, NDX, SPY and QQQ only",
-            },
-          ]}
-        />
         <div className="refresh">
           <Countdown remaining={remaining} paused={paused} frac={fetchedAt ? Math.min(1, elapsed / REFRESH_S) : 0} loading={map.loading} />
           <button type="button" className="icon-btn" onClick={() => setPaused((p) => !p)} aria-label={paused ? "Resume auto refresh" : "Pause auto refresh"} title={paused ? "Resume" : "Pause"}>
@@ -550,15 +475,6 @@ export default function LiveMap({ initialTicker, onTicker }: { initialTicker: st
             )}
             <br />
             {expText ?? `${m.by_expiry.length} ${m.by_expiry.length === 1 ? "expiry" : "expiries"}`} · {int(m.coverage.eligible)} contracts
-            {conv && (
-              <>
-                <br />
-                <span className="fut-aside">
-                  {conv.symbol} equivalents, basis {conv.basis >= 0 ? "+" : "-"}
-                  {Math.abs(conv.basis).toFixed(2)} (estimate)
-                </span>
-              </>
-            )}
           </div>
         )}
       </div>
@@ -583,17 +499,15 @@ export default function LiveMap({ initialTicker, onTicker }: { initialTicker: st
         </div>
       ) : present ? (
         <div className="present-stack">
-          <LevelsPanel m={m} levels={levels} frozen={showFrozen} layout="strip" onExplain={() => setDrawer(true)} fut={conv} />
-          {futOn && <FuturesPanel ticker={ticker} f={futData} error={futQ.error} loading={futQ.loading} ov={ov} onOverride={setOverride} />}
+          <LevelsPanel m={m} levels={levels} frozen={showFrozen} layout="strip" onExplain={() => setDrawer(true)} />
           {chartPanel}
-          <GuidancePanel ticker={ticker} expiries={selKey} signed={signedMode} asOf={m?.as_of ?? null} range={rangePct} fut={conv} exact={exact} />
+          <GuidancePanel ticker={ticker} expiries={selKey} signed={signedMode} asOf={m?.as_of ?? null} range={rangePct} />
         </div>
       ) : (
         <div className="grid-main">
           {chartPanel}
           <div className="side">
-            {futOn && <FuturesPanel ticker={ticker} f={futData} error={futQ.error} loading={futQ.loading} ov={ov} onOverride={setOverride} />}
-            <LevelsPanel m={m} levels={levels} frozen={showFrozen} layout="grid" onExplain={() => setDrawer(true)} fut={conv} />
+              <LevelsPanel m={m} levels={levels} frozen={showFrozen} layout="grid" onExplain={() => setDrawer(true)} />
             {m && m.vol_drift !== undefined && <VolDriftCard m={m} onExplain={() => setDrawer(true)} />}
             <ExpiryPanel m={m} exps={expList} />
             {m && m.warnings.length > 0 && (
@@ -615,7 +529,7 @@ export default function LiveMap({ initialTicker, onTicker }: { initialTicker: st
                 Open
               </span>
             </button>
-            <GuidancePanel ticker={ticker} expiries={selKey} signed={signedMode} asOf={m?.as_of ?? null} range={rangePct} fut={conv} exact={exact} />
+            <GuidancePanel ticker={ticker} expiries={selKey} signed={signedMode} asOf={m?.as_of ?? null} range={rangePct} />
           </div>
         </div>
       )}
@@ -780,15 +694,12 @@ function LevelsPanel({
   frozen,
   layout,
   onExplain,
-  fut = null,
 }: {
   m: GexMap | null;
   levels: ProfileLevels | null;
   frozen: boolean;
   layout: "grid" | "strip";
   onExplain?: () => void;
-  /** Futures view: the price tiles show the futures equivalent large and the index value small. */
-  fut?: FutConv | null;
 }) {
   if (!m || !levels) {
     return (
@@ -805,8 +716,6 @@ function LevelsPanel({
       </Panel>
     );
   }
-  // SPX/NDX: Cboe's value runs about 15 minutes behind, so spot, the sign, net GEX and every distance are read at the
-  // live estimate from SPY/QQQ when there is one. The walls and flips are strikes and crossings, not moved.
   const live = liveOf(m);
   const S = spotOf(m);
   const t = m.ticker;
@@ -816,8 +725,6 @@ function LevelsPanel({
   const prior = m.spot.basis === "prior_close";
   const ref = spotRef(m.spot.basis);
   const nowNote = (cur: number | null, fmt: (v: number | null) => string) => (frozen ? <>Now {fmt(cur)}.</> : null);
-  const cboeAt = `Cboe ${px(m.spot.price, t)} at ${nyTime(m.live_spot?.delayed_time ?? m.spot.ts, true)}`;
-  const liveOff = !live && m.live_spot && !prior && m.feed.market_open ? m.live_spot : null;
 
   const tiles: Kpi[] = [
     {
@@ -830,26 +737,16 @@ function LevelsPanel({
         "Spot"
       ),
       value: px(S, m.ticker),
-      sub: live
-        ? `from ${live.etf} at ${nyTime(live.ts, true)} · ${cboeAt} (${signedNum(live.diff ?? 0, 0)})`
-        : prior
-          ? `${t} prior close (Cboe, ${nyDay(m.spot.ts)} ${nyTime(m.spot.ts, true)} ET). Cboe's first live value arrives about 09:45 ET.`
-          : m.spot.basis === "regular_close"
-            ? m.spot.source === "cboe"
-              ? "Regular close (Cboe)"
-              : m.spot.source === "alpaca_parity"
-                ? `Close, from ${t} options (put-call parity)`
-                : "Regular close"
-            : m.spot.basis === "parity"
-              ? `From ${t} options (put-call parity) at ${nyTime(m.spot.ts, true)}`
-              : liveOff
-              ? `${cboeAt}, about 15 min delayed. No live estimate: ${liveOff.reason}`
-              : `${m.spot.source.replace("alpaca_", "").toUpperCase()} at ${nyTime(m.spot.ts, true)}`,
+      sub: prior
+        ? `${t} prior close (${nyDay(m.spot.ts)} ${nyTime(m.spot.ts, true)} ET). The first live value arrives after the open.`
+        : m.spot.basis === "regular_close"
+          ? "Regular close"
+          : m.spot.basis === "parity"
+            ? `From ${t} options (put-call parity) at ${nyTime(m.spot.ts, true)}`
+            : `${m.spot.source.toUpperCase()} at ${nyTime(m.spot.ts, true)}`,
       def: live
-        ? `Last ${live.etf} trade x the ${t}/${live.etf} ratio, priced at Cboe's ${t} value and the ${live.etf} trade of that same second. An estimate, not an index quote: Cboe's own value runs about 15 minutes behind.`
-        : m.spot.source === "alpaca_parity"
-          ? `Read from the options (strike + call - put near the money): Alpaca publishes no ${t} level. Live.`
-          : undefined,
+        ? `Last ${live.etf} trade x the ${t}/${live.etf} ratio. An estimate, not an index quote.`
+        : undefined,
     },
   ];
   if (shared) {
@@ -970,36 +867,6 @@ function LevelsPanel({
       ),
       def: GEX_UNITS,
     });
-  }
-  // Futures view: price tiles show the futures equivalent large, the index (or ETF) value small. Display only.
-  if (fut) {
-    const src: Record<string, number | null> = {
-      spot: S,
-      cpw: levels.call_wall,
-      cw: levels.call_wall,
-      pw: levels.put_wall,
-      zg: zgNow,
-    };
-    for (const k of tiles) {
-      if (!(k.key in src) || src[k.key] === null) continue;
-      const v = src[k.key] as number;
-      const idx = k.key === "spot" || k.key === "zg" ? px(v, t) : strike(v);
-      k.label = (
-        <>
-          {k.label}
-          <span className="fut-tag">{fut.root}</span>
-        </>
-      );
-      k.value = futPx(toFut(v, fut));
-      k.sub = (
-        <>
-          <span className="fut-idx">
-            {t} {idx}
-          </span>
-          {k.key === "spot" ? <> · {k.sub}</> : <> · {distText(v, S, t, ref)}</>}
-        </>
-      );
-    }
   }
   // No usable quotes: every current-chain value is unavailable, never a neutral sign or a $0 total. The 10:00
   // reference levels (frozen) come from the capture, so they stay.
@@ -1377,13 +1244,9 @@ function MethodBody({ m, ticker }: { m: GexMap | null; ticker: string }) {
             <dt>Spot</dt>
             <dd>
               {m.spot.basis === "prior_close"
-                ? `${price(m.spot.price)}, the prior session's close: Cboe's payload${m.feed.data_ts ? ` stamped ${nyTime(m.feed.data_ts, true)} ET` : ""} still carries the ${nyDay(m.spot.ts)} ${nyTime(m.spot.ts, true)} ET index value. Its first live value arrives about 09:45 ET; until then the gamma sign and distances are measured at that close.`
+                ? `${price(m.spot.price)}, the prior session's close: the feed still carries the ${nyDay(m.spot.ts)} ${nyTime(m.spot.ts, true)} ET value. Until its first live value, the gamma sign and distances are measured at that close.`
                 : m.spot.basis === "regular_close"
-                ? m.spot.source === "cboe"
-                  ? `${price(m.spot.price)}, the regular-session close from the Cboe delayed payload${m.feed.data_ts ? ` stamped ${nyWeekday(m.feed.data_ts)} ${nyTime(m.feed.data_ts, true)} ET` : ""}`
-                  : `${price(m.spot.price)}, the regular-session close (${m.spot.source}); extended-hours prints are ignored`
-                : m.spot.source === "alpaca_parity"
-                ? `${price(m.spot.price)} from put-call parity on ${m.ticker} options at ${nyTime(m.spot.ts, true)} ET (Alpaca publishes no index level)`
+                ? `${price(m.spot.price)}, the regular-session close (${m.spot.source}); extended-hours prints are ignored`
                 : `${price(m.spot.price)} from ${m.spot.source} at ${nyTime(m.spot.ts, true)} ET`}
             </dd>
             <dt>Valued at</dt>
@@ -1419,13 +1282,7 @@ function MethodBody({ m, ticker }: { m: GexMap | null; ticker: string }) {
         <h3>Feed labels</h3>
         <ul>
           <li>
-            <b>OPRA quotes, refreshed 60s</b>: consolidated option quotes. IV is solved from the bid and ask midpoint, falling back to indicative IV when the midpoint is unusable.
-          </li>
-          <li>
-            <b>Indicative quotes, modified; trades delayed 15m</b>: the free Alpaca option feed. IV and greeks come from that feed.
-          </li>
-          <li>
-            <b>Cboe delayed quotes (about 15 min)</b>: SPX and NDX. Spot is the delayed index level in the same file.
+            <b>Deribit public API, refreshed 60s</b>, <b>OKX public API, refreshed 60s</b> and <b>Deribit + OKX public APIs, refreshed 60s</b>: live option quotes and open interest from the venues listed under Venues. IV is solved from the bid and ask midpoint.
           </li>
           <li>When no refresh has succeeded for 3 minutes, or the market is closed, that state replaces the label.</li>
         </ul>
@@ -1433,9 +1290,7 @@ function MethodBody({ m, ticker }: { m: GexMap | null; ticker: string }) {
       <section>
         <h3>Settlement</h3>
         <ul>
-          <li>Deribit crypto options (BTC, ETH): 08:00 UTC on the expiration date, every day of the week.</li>
-          <li>PM settled (SPY, QQQ, stocks, SPXW, NDXP): 16:00 ET on the expiration date, early closes respected.</li>
-          <li>AM settled (SPX and NDX monthly roots): 09:30 ET on the expiration date. Marked AM on the expiry chips.</li>
+          <li>Crypto options (Deribit, OKX, Bybit, Binance): 08:00 UTC on the expiration date, every day of the week.</li>
         </ul>
       </section>
       <section>
@@ -1716,12 +1571,6 @@ function VolDriftSection({ m }: { m: GexMap | null }) {
       )}
     </section>
   );
-}
-
-const WEEKDAY = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" });
-function nyWeekday(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : WEEKDAY.format(d);
 }
 
 const MAG_EXPLAINER =

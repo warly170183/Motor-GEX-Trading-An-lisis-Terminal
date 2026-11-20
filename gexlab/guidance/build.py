@@ -56,10 +56,9 @@ def r2(x: float | None) -> float | None:
 
 
 def is_index(ticker: str | None) -> bool:
-    """SPX, NDX and BTC quote in whole numbers (index points, or whole dollars on a $60,000 coin): every PRICE is
-    a whole number. The name is historical; it is the rounding switch."""
-    return ticker in config.INDEX_TICKERS or (config.is_crypto(ticker)
-                                             and config.CRYPTO_PX_DECIMALS.get((ticker or "").upper(), 2) == 0)
+    """A coin that quotes in whole dollars (BTC): every PRICE is a whole number. The name is historical; it is
+    the rounding switch."""
+    return config.is_crypto(ticker) and config.CRYPTO_PX_DECIMALS.get((ticker or "").upper(), 2) == 0
 
 
 _DP: contextvars.ContextVar = contextvars.ContextVar("guidance_dp", default=None)
@@ -648,7 +647,7 @@ def _build(m: dict, *, zero_dte: dict | None = None, scorecard: dict | None = No
     elif feed.get("market_open") and (feed.get("data_age_s") or 0) > config.GUIDANCE_MAX_DATA_AGE_S:
         blocked.append(f"the vendor data is {int(feed['data_age_s'] // 60)} min old")
     if (m.get("spot") or {}).get("basis") == "prior_close":
-        blocked.append("the index value is the prior close until Cboe's first live value, about 09:45 ET")
+        blocked.append("the value is the prior close until the first live value")
     cv = m.get("coverage") or {}
     if cv.get("gate_pct") is not None and cv.get("eligible"):
         if cv.get("gex_pct") is None:

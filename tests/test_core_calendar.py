@@ -30,7 +30,7 @@ def test_am_expired_after_0930():
 
 
 def test_early_close_calendar_aware():
-    cal = TradingCalendar.from_alpaca([{"date": "2026-11-27", "open": "09:30", "close": "13:00"}])
+    cal = TradingCalendar.from_rows([{"date": "2026-11-27", "open": "09:30", "close": "13:00"}])
     as_of = datetime(2026, 11, 27, 15, 0, tzinfo=UTC)          # 10:00 EST (UTC-5)
     t = time_to_expiry(as_of, date(2026, 11, 27), "PM", cal)
     assert abs(t * SECONDS_PER_YEAR - 3 * 3600) < 1e-6          # to 13:00, not 16:00

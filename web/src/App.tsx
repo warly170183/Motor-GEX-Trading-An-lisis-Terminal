@@ -95,7 +95,7 @@ export default function App() {
   const demo = MOCK || health.data?.demo === true;
   const [present, togglePresent] = usePresentMode();
 
-  // No ticker in the URL: BTC (Deribit needs no keys, so this map always loads; equities need Alpaca keys).
+  // No ticker in the URL: BTC (Deribit needs no keys, so this map always loads).
   const ticker = (params.get("ticker") || "BTC").toUpperCase();
   const awaitingDefault = !params.get("ticker") && health.loading;
   const route = NAV.some((n) => n.path === path) ? path : "/live";
@@ -146,11 +146,7 @@ export default function App() {
               {demo && <span className="badge-synth">Synthetic fixture</span>}
               <span>Research tool. Describes where option gamma sits under a stated assumption. No forecasts.</span>
               <span className="spacer" />
-              {health.data && (
-                <span>
-                  API {health.data.status} · rate {health.data.rate.used_last_min}/{health.data.rate.cap} per min
-                </span>
-              )}
+              {health.data && <span>API {health.data.status}</span>}
               {health.error && !MOCK && <span className="footer-err">API offline on {API_HOST}</span>}
               <span>Times in New York</span>
               <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer" style={{ color: "inherit" }}>

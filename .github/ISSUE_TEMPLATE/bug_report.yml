@@ -31,7 +31,7 @@ body:
         - GEX levels (walls, gamma flip, regime)
         - Net GEX size or ATR
         - Trade guidance
-        - Data source (Alpaca or Cboe)
+        - Data source (Deribit, OKX, Bybit or Binance)
         - Install or startup
         - Other
     validations:
@@ -51,7 +51,7 @@ body:
     id: system
     attributes:
       label: System
-      placeholder: Windows 11, Python 3.12, Node 22, Alpaca free plan
+      placeholder: Windows 11, Python 3.12, Node 22
   - type: textarea
     id: logs
     attributes:

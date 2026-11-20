@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS captures (
     spot            REAL,
     spot_ts         TEXT,
     spot_source     TEXT,
-    feed            TEXT,                     -- opra | indicative | cboe_delayed
-    source_ts       TEXT,                     -- payload timestamp when the source supplies one (Cboe)
+    feed            TEXT,                     -- deribit | okx | deribit+okx (older rows: opra | indicative | cboe_delayed)
+    source_ts       TEXT,                     -- payload timestamp when the source supplies one
     model_version   TEXT NOT NULL,
     oi_date         TEXT,
     status          TEXT NOT NULL,            -- eligible | late | invalid
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS capture_contracts (
     multiplier  INTEGER NOT NULL DEFAULT 100,
     oi          INTEGER,
     iv          REAL,
-    iv_source   TEXT,                         -- indicative | solved_mid | cboe
+    iv_source   TEXT,                         -- solved_mid | vendor (older rows: indicative | cboe)
     bid         REAL,
     ask         REAL,
     quote_ts    TEXT,
@@ -223,14 +223,14 @@ CREATE TABLE IF NOT EXISTS replays (
 # (table, column, type): additive and nullable only. Never rename or drop here.
 MIGRATIONS = [
     ("captures", "input_digest", "TEXT"),          # sha256 of the canonical calculation inputs (see engine/digest.py)
-    ("captures", "calendar_source", "TEXT"),       # alpaca | alpaca_cache | weekday_fallback
+    ("captures", "calendar_source", "TEXT"),       # exchange | weekday_fallback (older rows: alpaca | alpaca_cache)
     ("capture_contracts", "oi_date", "TEXT"),      # per-contract open_interest_date
     ("capture_contracts", "iv_shared", "INTEGER"), # 1 when the IV in use was copied from the strike pair
     ("capture_contracts", "iv_own", "REAL"),       # the contract's own IV before sharing
     ("capture_contracts", "iv_own_source", "TEXT"),
     ("capture_contracts", "iv_donor", "TEXT"),     # donor symbol when shared
     ("capture_contracts", "iv_donor_ts", "TEXT"),  # donor quote time when shared
-    ("bars", "vw", "REAL"),                        # provider bar VWAP (Alpaca `vw`); null for old rows
+    ("bars", "vw", "REAL"),                        # provider bar VWAP; null for old rows
     ("placebos", "idx", "INTEGER"),                # draw index inside its set; unique per (capture, family)
     ("captures", "gross_gex", "REAL"),             # sum of |GEX| over valid contracts: the regime's neutral band
     ("captures", "invalid_counts", "TEXT"),        # JSON {reason: n} over the contracts inside the coverage band
@@ -239,11 +239,11 @@ MIGRATIONS = [
     ("captures", "gate_version", "TEXT"),          # eligibility gate that judged the row; NULL = 1.0 (contract count)
     ("captures", "oi_coverage_pct", "REAL"),       # gate 1.1 number (diagnostic since 1.2): % of OI within +-5% valid
     ("captures", "gex_coverage_pct", "REAL"),      # gate 1.2 number: % of estimated |GEX| within +-5% that is valid
-    ("captures", "oi_source", "TEXT"),             # cboe | alpaca: open interest vendor (model 1.1); NULL = not recorded
-                                                   # (rows before 2026-10-19 ~12:00 ET: SPY/QQQ Alpaca, SPX/NDX Cboe)
-    ("captures", "oi_label", "TEXT"),              # e.g. "OI: Cboe (prior session, inferred)" / "OI: Alpaca (Oct 15)"
-    ("capture_contracts", "oi_source", "TEXT"),    # cboe | alpaca per contract (a contract Cboe lacks keeps Alpaca OI)
-    ("captures", "oi_basis", "TEXT"),              # inferred | matches_alpaca | reported: how the OI date was set (gate 1.3)
+    ("captures", "oi_source", "TEXT"),             # open interest vendor; NULL = not recorded
+                                                   # (rows before 2026-10-19 ~12:00 ET came from the retired equity feeds)
+    ("captures", "oi_label", "TEXT"),              # e.g. "OI: Deribit (live)"
+    ("capture_contracts", "oi_source", "TEXT"),    # open interest vendor per contract
+    ("captures", "oi_basis", "TEXT"),              # inferred | reported: how the OI date was set (gate 1.3; older rows: matches_alpaca)
     ("captures", "oi_expected_date", "TEXT"),      # the previous completed session the OI must be from (gate 1.3)
     ("captures", "oi_stale_pct", "REAL"),          # % of band OI dated other than oi_expected_date (gate 1.3: <= 1%)
     ("captures", "oi_dates", "TEXT"),              # JSON {oi_date: band OI}, per contract, so no date hides another
@@ -251,8 +251,8 @@ MIGRATIONS = [
     ("captures", "gex_charged_pct", "REAL"),       # % of the band |GEX| total that is that charge
     ("session_processing", "study_eligible", "INTEGER"),  # 1 = counts toward the studies under the declared cohort
     ("session_processing", "study_reasons", "TEXT"),      # why it does not count (comma separated), null when it does
-    ("captures", "index_ts", "TEXT"),              # Cboe index captures: the index value's own market-data time
-                                                   # (last_trade_time); NULL before 2026-10-29 and for Alpaca feeds
+    ("captures", "index_ts", "TEXT"),              # index captures: the index value's own market-data time
+                                                   # (last_trade_time); NULL before 2026-10-29 and for feeds without it
 ]
 
 # Indexes that depend on migrated columns: created after MIGRATIONS ran.

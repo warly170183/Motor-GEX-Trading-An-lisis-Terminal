@@ -218,7 +218,7 @@ export function priceDigits(ticker: string): number {
 }
 
 /** "$2.35 below spot" (SPY, QQQ, stocks) or "4 index points above spot" (SPX, NDX). ref names what spot is
- *  ("the prior close" while Cboe still carries the prior session's index value). */
+ *  ("the prior close" while the feed still carries the prior session's value). */
 export function distText(level: number | null | undefined, spot: number, ticker: string, ref = "spot"): string {
   if (level === null || level === undefined || !Number.isFinite(level)) return "none in range";
   const d = level - spot;

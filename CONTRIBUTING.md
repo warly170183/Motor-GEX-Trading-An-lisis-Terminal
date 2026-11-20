@@ -13,8 +13,7 @@ These decide most review questions, so they are worth knowing before you start:
 1. **Local first.** Everything runs on the user's machine. No accounts, no telemetry, no cloud
    service. A change that sends data somewhere new, opens a network port beyond `127.0.0.1`, or adds
    a background job needs to be discussed in an issue first. Market data stays REST only: no
-   websocket (an Alpaca account gets one, and a user's own scanner may hold it) and never an order
-   endpoint.
+   websocket and never an order endpoint.
 2. **Every number can be traced.** A level on the map comes from the stated GEX formula; a price in
    the trade guidance is a map level or a listed computation of map numbers (`computations` in the
    guidance object). The grounding tests in `tests/test_guidance.py` must keep passing. A change that
@@ -27,15 +26,13 @@ These decide most review questions, so they are worth knowing before you start:
 
 ## Setting up
 
-Requirements: Python 3.11 or newer, Node.js LTS, and Alpaca API keys for SPY, QQQ and stocks (SPX
-and NDX work without them).
+Requirements: Python 3.11 or newer and Node.js LTS. No API keys are needed.
 
 On Windows, run `setup.bat` once and `launch.bat` to start. By hand:
 
 ```bash
 python -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt     # Windows: .venv\Scripts\python
-cp .env.example .env
 cd web && npm ci && npm run build && cd ..
 .venv/bin/python -m uvicorn gexlab.api:app --host 127.0.0.1 --port 8240
 ```

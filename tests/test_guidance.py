@@ -162,16 +162,6 @@ def _all_prices(g: dict) -> list[float]:
     return out
 
 
-def spx_live_like() -> dict:
-    """SPX with off-grid numbers seen on screen: spot 7,659.44, gamma flip 7,766.39."""
-    m = fmap("SPX")
-    m["spot"]["price"] = 7659.44
-    m["levels"]["zero_gamma"] = [7766.39]
-    m["levels"]["nearest_zero_gamma"] = 7766.39
-    m["frozen_today"]["nearest_zero_gamma"] = 7760.61
-    return m
-
-
 def influential(m: dict) -> dict:
     """The same map with a net to gross above the mixed cut, so scenarios are built."""
     m = copy.deepcopy(m)
@@ -179,67 +169,11 @@ def influential(m: dict) -> dict:
     return m
 
 
-@pytest.mark.parametrize("m", [fmap("SPX"), fmap("NDX"), spx_live_like(), influential(fmap("SPX")),
-                               influential(fmap("NDX")), influential(spx_live_like())],
-                         ids=["SPX", "NDX", "SPX-live", "SPX-scen", "NDX-scen", "SPX-live-scen"])
-def test_index_prices_are_whole_points(m):
-    g = build.build(m, zero_dte={"expiry": "2026-10-16", "minutes_to_close": 360})
-    if m["magnitude"]["gross"]["net_to_gross"] == 0.4123:
-        assert any(s["bias"] != "flat" for s in g["scenarios"]), g["setup_notes"]
-        assert g["atr"]["fade_zone"] == int(g["atr"]["fade_zone"]) and g["target_gap"] == int(g["target_gap"])
-    for p in _all_prices(g):
-        assert p == int(p), f"{g['ticker']}: price {p} is not a whole index point"
-    # non-price numbers keep their decimals
-    assert g["regime"]["net_to_gross_pct"] != int(g["regime"]["net_to_gross_pct"])
-    assert any(lv["distance_pct"] not in (None, int(lv["distance_pct"])) for lv in g["levels"])
-    text = template.render(g)
-    assert not re.search(r"\d,\d{3}\.\d", text), text          # no index level with decimals
-    assert validate.validate(text, g) == [], text
-    every_string = json.dumps(g)
-    assert not re.search(r"\d,\d{3}\.\d", every_string)
-
-
-def test_spx_live_numbers_render_whole():
-    g = build.build(spx_live_like())
-    assert g["spot"] == 7659.0
-    flip = next(lv for lv in g["levels"] if lv["key"] == "gamma_flip")
-    assert flip["price"] == 7766.0 and flip["distance"] == 107.0
-    assert g["regime"]["summary"] == "SPX at 7,659 is in positive gamma, 107 below the gamma flip at 7,766."
-    assert any("moved from 7,761 at 10:00 to 7,766 now" in c for c in g["regime_change"])
-    text = template.render(g)
-    assert "7,766.39" not in text and "7,659.44" not in text and "7,766" in text
-    # the AI validator now rejects the unrounded figure: it is no longer a number the object states
-    bad = validate.validate(text.replace("7,766", "7,766.39", 1), g)
-    assert any("number not in the guidance: 7,766.39" in r for r in bad), bad
-    # the build stays grounded in the whole-point map prices
-    assert 7766.0 in build.map_prices(spx_live_like()) and 7659.0 in build.map_prices(spx_live_like())
-
-
-def test_index_half_point_rounds_like_the_web():
-    m = fmap("SPX")                                        # fixture spot is 7,046.50
-    assert build.build(m)["spot"] == 7047.0                # half away from zero, as toLocaleString shows it
-
-
 def test_stop_rounds_away_from_the_trigger():
     assert build.rp_away(7700.3, "up", True) == 7701.0     # short stop sits above: ceil
     assert build.rp_away(7700.7, "down", True) == 7700.0   # long stop sits below: floor
     assert build.rp_away(7701.0, "up", True) == 7701.0 and build.rp_away(7700.0, "down", True) == 7700.0
-    assert build.rp_away(705.774, "up") == 705.77          # SPY and stocks keep cents
-    m = influential(fmap("NDX"))
-    m["magnitude"]["per_atr"] = {"atr_basis": "own", "atr_usd": 352.4, "atr_label": "test ATR"}   # raw buffer 35.2
-    g = build.build(m)
-    assert g["atr"]["value"] == 352.0 and g["atr"]["buffer"] == 36.0      # rounded up, never down to 35
-    assert "rounded up to a whole index point" in g["atr"]["buffer_formula"]
-    raw_buf = build.ATR_BUFFER_MULT * g["atr"]["value"]
-    traded = [s for s in g["scenarios"] if s["bias"] != "flat"]
-    assert traded
-    for s in traded:
-        e, stop = s["entry"], s["stop"]["price"]
-        assert stop == int(stop)
-        if s["bias"] == "short":                           # trigger is the entry high
-            assert stop > e["high"] and stop - e["high"] >= raw_buf
-        else:                                              # trigger is the entry low
-            assert stop < e["low"] and e["low"] - stop >= raw_buf
+    assert build.rp_away(705.774, "up") == 705.77          # coins quoted in cents keep cents
 
 
 def test_regime_change_and_confidence():
@@ -593,14 +527,14 @@ def test_old_vendor_data_blocks_setups_while_the_market_is_open():
 
 @pytest.mark.parametrize("patch, note", [
     (lambda f: f.update(excluded="stale_oi"), "excluded from the studies"),
-    (lambda f: f.update(oi_source="alpaca"), "different map"),
+    (lambda f: f.update(oi_source="deribit"), "different map"),
     (lambda f: f.update(expiries=["2026-10-16"]), "different map"),
 ])
 def test_frozen_levels_need_an_unexcluded_comparable_capture(patch, note):
     m = fmap("SPY")
-    m["oi_source"] = {"kind": "cboe"}
+    m["oi_source"] = {"kind": "okx"}
     m["expiry_selection"] = {"all": True, "expiries": ["2026-10-16", "2026-10-19"]}
-    m["frozen_today"].update(oi_source="cboe", expiries=["2026-10-16", "2026-10-19"])
+    m["frozen_today"].update(oi_source="okx", expiries=["2026-10-16", "2026-10-19"])
     m["frozen_today"]["put_wall"] = 699.0
     patch(m["frozen_today"])
     g = build.build(m)

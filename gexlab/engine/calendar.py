@@ -27,24 +27,24 @@ class Session:
 
 @dataclass
 class TradingCalendar:
-    """Sessions keyed by date. Built from Alpaca /v2/calendar, or weekdays as a labeled fallback.
+    """Sessions keyed by date. Built from exchange calendar rows, or weekdays as a labeled fallback.
 
-    source: alpaca (fetched now) | alpaca_cache (validated copy from disk) | weekday_fallback
+    source: exchange (rows with holidays and early closes) | weekday_fallback
     (no exchange calendar: holidays and early closes unknown, so frozen captures are invalid).
     """
     sessions: dict[date, Session] = field(default_factory=dict)
-    source: str = "alpaca"
+    source: str = "exchange"
     covered: tuple[date, date] | None = None
     fetched_at: str | None = None   # ISO UTC of the vendor fetch, for provenance
 
     @classmethod
-    def from_alpaca(cls, rows: list[dict]) -> "TradingCalendar":
+    def from_rows(cls, rows: list[dict]) -> "TradingCalendar":
         sessions = {}
         for r in rows:
             d = date.fromisoformat(r["date"])
             sessions[d] = Session(d, _parse_hhmm(r["open"]), _parse_hhmm(r["close"]))
         cov = (min(sessions), max(sessions)) if sessions else None
-        return cls(sessions, "alpaca", cov)
+        return cls(sessions, "exchange", cov)
 
     @classmethod
     def weekdays(cls, start: date, end: date) -> "TradingCalendar":
@@ -59,29 +59,11 @@ class TradingCalendar:
 
     @property
     def exchange(self) -> bool:
-        """True when this is a real exchange calendar (live or a validated disk copy)."""
-        return self.source in ("alpaca", "alpaca_cache")
+        """True when this is a real exchange calendar."""
+        return self.source == "exchange"
 
     def covers(self, start: date, end: date) -> bool:
         return bool(self.covered) and self.covered[0] <= start and self.covered[1] >= end
-
-    def to_json(self) -> dict:
-        return {"source": "alpaca", "fetched_at": self.fetched_at,
-                "covered": [self.covered[0].isoformat(), self.covered[1].isoformat()] if self.covered else None,
-                "sessions": [{"date": d.isoformat(), "open": s.open.strftime("%H:%M"),
-                              "close": s.close.strftime("%H:%M")} for d, s in sorted(self.sessions.items())]}
-
-    @classmethod
-    def from_json(cls, j: dict) -> "TradingCalendar":
-        """Rebuild a saved exchange calendar. Raises ValueError on anything malformed."""
-        if j.get("source") != "alpaca" or not j.get("covered") or not j.get("sessions"):
-            raise ValueError("not a saved exchange calendar")
-        cal = cls.from_alpaca(j["sessions"])
-        cal.covered = (date.fromisoformat(j["covered"][0]), date.fromisoformat(j["covered"][1]))
-        if not all(cal.covered[0] <= d <= cal.covered[1] for d in cal.sessions):
-            raise ValueError("sessions outside the covered range")
-        cal.source, cal.fetched_at = "alpaca_cache", j.get("fetched_at")
-        return cal
 
     def provenance(self) -> dict:
         return {"source": self.source, "fetched_at": self.fetched_at,
@@ -192,7 +174,7 @@ def valuation_time(cal: "TradingCalendar | None", now: datetime,
     regular-session close (16:00 ET or the early close), or the quote time when the quotes
     are older than that close. Outside the session the quotes and IVs are the close's;
     measuring T from the wall clock shrinks T over a weekend while the IVs stay Friday's,
-    which overstates near-the-money gamma (verified against Cboe's published gamma).
+    which overstates near-the-money gamma (verified against a published gamma reference).
     """
     if cal is None or cal.market_open(now):
         return min(quote_time, now) if quote_time is not None else now
@@ -202,8 +184,7 @@ def valuation_time(cal: "TradingCalendar | None", now: datetime,
 
 def predates_session(cal: "TradingCalendar | None", value_ts: datetime | None, now: datetime) -> bool:
     """True when the market is open at now and value_ts is earlier than today's session open: a prior session's
-    value served during today's session. Cboe's delayed payload carries the prior close as the index value until
-    its first live value, about 09:45 ET (seen 2026-10-29: last_trade_time Oct 28 16:14:59 at 09:39 ET)."""
+    value served during today's session (a feed that still carries the prior close before its first live value)."""
     if cal is None or value_ts is None or not cal.market_open(now):
         return False
     opened = cal.open_dt(now.astimezone(NY).date())

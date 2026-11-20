@@ -31,13 +31,9 @@ def model_settings(ticker: str, spot: float) -> dict:
         "wall_strike_band": config.WALL_STRIKE_BAND, "coverage_strike_band": config.COVERAGE_STRIKE_BAND,
         "fetch_strike_band": config.FETCH_STRIKE_BAND, "iv_min": config.IV_MIN, "iv_max": config.IV_MAX,
         "wide_spread_frac": config.WIDE_SPREAD_FRAC, "neutral_frac": config.NEUTRAL_FRAC,
-        "quote_spot_max_skew_s": config.QUOTE_SPOT_MAX_SKEW_S, "window_days": config.WINDOW_DAYS,
-        "indicative_iv_max_age_s": config.INDICATIVE_IV_MAX_AGE_S,
-        "oi_null_ambiguous_max_frac": config.OI_NULL_AMBIGUOUS_MAX_FRAC,
+        "window_days": config.WINDOW_DAYS,
         "gate_version": config.GATE_VERSION, "gate_oi_band": config.GATE_OI_BAND,
         "gate_oi_min_pct": config.GATE_OI_MIN_PCT, "gate_gex_min_pct": config.GATE_GEX_MIN_PCT,
-        "oi_source_policy": config.OI_SOURCE, "cboe_oi_min_match": config.CBOE_OI_MIN_MATCH,
-        "cboe_oi_same_max_frac": config.CBOE_OI_SAME_MAX_FRAC,
     }
 
 

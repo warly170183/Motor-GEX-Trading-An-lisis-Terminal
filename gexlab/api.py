@@ -49,8 +49,6 @@ def _ticker(t: str) -> str:
 def _vendor_error(e: SourceError) -> HTTPException:
     if e.status == 404:
         return HTTPException(404, str(e))
-    if e.status == 401:
-        return HTTPException(503, "Alpaca rejected the configured keys (HTTP 401).")
     return HTTPException(503, f"Data source unavailable: {e}")
 
 
@@ -145,16 +143,6 @@ def gex_map(ticker: str, expiries: str | None = None, signed: bool = True):
             raise HTTPException(400, "expiries must be YYYY-MM-DD, comma separated")
     try:
         return service.build_map(_ticker(ticker), exp, signed)
-    except SourceError as e:
-        raise _vendor_error(e)
-
-
-@app.get("/api/futures")
-def futures_view(ticker: str, override_price: float | None = Query(None, gt=0),
-                 override_basis: float | None = None):
-    """Futures view conversion for SPX, NDX, SPY and QQQ (display only; the map is unchanged)."""
-    try:
-        return service.futures_view(_ticker(ticker), override_price, override_basis)
     except SourceError as e:
         raise _vendor_error(e)
 

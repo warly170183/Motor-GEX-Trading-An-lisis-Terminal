@@ -31,7 +31,7 @@ def cal(holidays=(), start=date(2026, 10, 1), end=date(2026, 12, 31)) -> Trading
         if d.weekday() < 5 and d not in holidays:
             rows.append({"date": d.isoformat(), "open": "09:30", "close": "16:00"})
         d += timedelta(days=1)
-    c = TradingCalendar.from_alpaca(rows)
+    c = TradingCalendar.from_rows(rows)
     c.covered = (start, end)
     return c
 
@@ -209,7 +209,7 @@ def chain_at(iv_base: float, at: datetime, spot: float = 100.0, iv_ts="at") -> C
     ts = at if iv_ts == "at" else iv_ts
     cs = smile([96, 97, 98, 99, 100, 101, 102, 103, 104], base=iv_base, iv_ts=ts, iv_source="solved_mid")
     cs += smile([96, 98, 100, 102, 104], expiry=WED, base=0.50, iv_ts=ts)   # 0DTE, never measured
-    return Chain(ticker="SPY", as_of=at, spot=Spot(spot, at, "alpaca_sip"), feed="opra", contracts=cs,
+    return Chain(ticker="SPY", as_of=at, spot=Spot(spot, at, "demo"), feed="demo", contracts=cs,
                  valuation_ts=at)
 
 
@@ -440,8 +440,8 @@ def test_flat_pairing_never_claims_zero_change():
 def test_rendered_ui_text_keeps_the_vocabulary_rule():
     from pathlib import Path
     src = (Path(__file__).resolve().parent.parent / "web" / "src" / "screens" / "LiveMap.tsx").read_text(encoding="utf-8")
-    i, j = src.index("// ---------- DEX: a Levels now tile"), src.index("const WEEKDAY = new Intl.DateTimeFormat(")
-    assert not BANNED.search(src[i:j]) and not DASHES.search(src[i:j])
+    i = src.index("// ---------- DEX: a Levels now tile")
+    assert not BANNED.search(src[i:]) and not DASHES.search(src[i:])
 
 
 def test_first_reading_with_quotes_stamped_after_the_fetch_start_still_shows_its_change(tmp_path):

@@ -1,6 +1,5 @@
 """Chain fetching, caching and map assembly shared by the API and the recorder."""
 from __future__ import annotations
-import math
 
 import json
 import threading
@@ -15,85 +14,35 @@ from gexlab.engine import dex as DX
 from gexlab.engine import gex as G
 from gexlab.engine import structure as ST
 from gexlab.engine import voldrift as VD
-from gexlab.engine.calendar import (NY, UTC, CryptoCalendar, TradingCalendar, crypto_expiry_kind, expiry_kind, iso_z,
+from gexlab.engine.calendar import (NY, CryptoCalendar, TradingCalendar, crypto_expiry_kind, expiry_kind, iso_z,
                                     ny_today, settlement_dt, utc_now, utc_today, valuation_label)
 from gexlab.models import Chain, Contract, Spot
-from gexlab.sources import cboe, crypto as crypto_src, deribit, occ, okx
-from gexlab.sources.alpaca import FEED_STATE, AlpacaSource, load_credentials
-from gexlab.sources.base import SourceError, limiter
+from gexlab.sources import crypto as crypto_src, deribit, okx
+from gexlab.sources.base import SourceError
 
 log = logging.getLogger("gexlab.service")
 
 # ---------------------------------------------------------------- calendar
 
-_CAL: dict = {"cal": None, "at": 0.0, "ttl": 0.0, "error": None}
-
-
-def _calendar_needed(d: date) -> tuple[date, date]:
-    """Dates a capture on day d depends on: prior sessions (OI date) through the last expiry."""
-    return d - timedelta(days=10), d + timedelta(days=config.WINDOW_DAYS)
-
-
-def save_calendar_cache(cal: TradingCalendar, path: Path | None = None) -> None:
-    from gexlab.sources.base import atomic_write_bytes
-    atomic_write_bytes(path or config.CALENDAR_DISK_CACHE, json.dumps(cal.to_json()).encode("utf-8"))
-
-
-def load_calendar_cache(d: date, path: Path | None = None) -> TradingCalendar | None:
-    """The last saved exchange calendar, only if it parses and covers what day d needs."""
-    p = path or config.CALENDAR_DISK_CACHE
-    try:
-        cal = TradingCalendar.from_json(json.loads(p.read_text(encoding="utf-8")))
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    return cal if cal.covers(*_calendar_needed(d)) else None
-
-
 def get_calendar(now: datetime | None = None) -> TradingCalendar:
-    """Exchange calendar (early closes included).
-
-    Order: live Alpaca calendar (saved to disk on success) -> the validated disk copy
-    (source alpaca_cache) -> a weekday calendar (source weekday_fallback). The fallback is
-    retried after CALENDAR_RETRY_S, never trusted for the full cache period, and the
-    recorder marks any capture computed on it invalid ("calendar_unavailable").
-    """
+    """Weekday calendar. No live equity source exists, so this only serves demo mode and the engine's own tests;
+    crypto uses CryptoCalendar. It is labeled weekday_fallback, and the recorder marks anything computed on it invalid."""
     now = now or utc_now()
-    if config.is_demo():
-        d = demo_as_of().date()
-        return TradingCalendar.weekdays(d - timedelta(days=120), d + timedelta(days=30))
-    if _CAL["cal"] is not None and _time.time() - _CAL["at"] < _CAL["ttl"]:
-        return _CAL["cal"]
-    d = ny_today(now)
-    try:
-        cal = AlpacaSource(priority="high", who="calendar").calendar(d)
-        cal.source = "alpaca"
-        cal.fetched_at = cal.fetched_at or iso_z(utc_now())
-        try:
-            save_calendar_cache(cal)
-        except OSError:
-            pass
-        ttl, err = config.CALENDAR_CACHE_S, None
-    except SourceError as e:
-        err = str(e)
-        cal = load_calendar_cache(d)
-        if cal is None:
-            cal = TradingCalendar.weekdays(d - timedelta(days=120), d + timedelta(days=30))
-        ttl = config.CALENDAR_RETRY_S
-    _CAL.update(cal=cal, at=_time.time(), ttl=ttl, error=err)
-    return cal
+    d = demo_as_of().date() if config.is_demo() else ny_today(now)
+    return TradingCalendar.weekdays(d - timedelta(days=120), d + timedelta(days=30))
 
 
 _CRYPTO_CAL = CryptoCalendar()
 
 
 def calendar_for(ticker: str) -> TradingCalendar:
-    """Crypto trades 24/7 and needs no exchange calendar (and no Alpaca call); equities use the exchange calendar."""
+    """Crypto trades 24/7 and needs no exchange calendar."""
     return _CRYPTO_CAL if config.is_crypto(ticker) else get_calendar()
 
 
 def calendar_status(cal: TradingCalendar | None = None) -> dict:
     cal = cal or get_calendar()
-    return {**cal.provenance(), "degraded": not cal.exchange, "last_error": _CAL.get("error")}
+    return {**cal.provenance(), "degraded": not cal.exchange, "last_error": None}
 
 
 # ---------------------------------------------------------------- demo fixtures
@@ -176,21 +125,7 @@ def fetch_chain(ticker: str, priority: str = "low", now: datetime | None = None,
         cal = cal or _CRYPTO_CAL
         ch = crypto_src.fetch_chain(ticker, now)
     else:
-        now = now or utc_now()
-        cal = cal or get_calendar(now)
-        recorder = priority == "high"      # the recorder keeps its budget but ignores the dashboard cooldown
-        if ticker in config.CBOE_TICKERS:
-            ch = cboe.fetch_chain(ticker, now, cal, budget_s=config.CBOE_CHAIN_BUDGET_S if recorder else None,
-                                  respect_cooldown=not recorder)
-        else:
-            src = AlpacaSource(priority=priority, who="recorder" if recorder else "api")
-            if config.OI_SOURCE == "occ":
-                overlay = occ.apply_oi
-            elif config.OI_SOURCE == "cboe" and ticker not in config.ALPACA_INDEX:
-                overlay = (lambda t, cs, at, cl, h: cboe.apply_oi(t, cs, at, cl, h, respect_cooldown=not recorder))
-            else:
-                overlay = None
-            ch = src.fetch_chain(ticker, now, cal, strict=strict, oi_overlay=overlay)
+        raise SourceError(f"{ticker} is not served: the app covers crypto options only", status=404)
     ch.contracts = G.finalize(ch.contracts, ch.spot.price, ch.valuation, cal)   # T from the valuation clock
     return ch
 
@@ -242,16 +177,12 @@ def fmt_px(x: float | None, ticker: str) -> str:
         return "n/a"
     if config.is_crypto(ticker):
         return _crypto_fmt(x, ticker)
-    if ticker in config.INDEX_TICKERS:
-        return f"{math.floor(x + 0.5):,}"  # index points: whole numbers, halves up like the web
     return f"{x:.2f}".rstrip("0").rstrip(".") if x != int(x) else f"{int(x)}"
 
 
 def fmt_spot(x: float, ticker: str = "") -> str:
     if config.is_crypto(ticker):
         return _crypto_fmt(x, ticker)
-    if ticker in config.INDEX_TICKERS:
-        return f"{math.floor(x + 0.5):,}"  # index points: whole numbers, halves up
     return f"{x:,.2f}"
 
 
@@ -287,7 +218,7 @@ def lead_sentence(ticker: str, spot: float, lv: G.Levels, coverage_pct: float, p
         body += (f" Net gamma stays {lv.regime if lv.regime != 'neutral' else 'near zero'} "
                  f"with no gamma flip within {band}% of spot.")
     if prior_close:
-        body += f" Cboe's first live {ticker} value arrives about 09:45 ET."
+        body += f" The first live {ticker} value arrives after the open."
     band = int(round(config.band("coverage", ticker) * 100))
     return f"{body} Built from {coverage_pct:.1f}% of the chain within {band}% of spot."
 
@@ -296,8 +227,8 @@ def quote_state(contracts: list[Contract], cov: G.Coverage) -> dict:
     """Whether the selected chain has anything the map can be built from.
 
     usable is False when no contract within the coverage band is valid. reason "no_live_quotes": no
-    contract in the selection has a bid, an ask or an IV (Cboe's delayed payload in the first minutes
-    after the open, 2026-10-20); "no_usable_contracts": quotes exist but none is usable. Either way the
+    contract in the selection has a bid, an ask or an IV (a delayed feed in the first minutes
+    after the open); "no_usable_contracts": quotes exist but none is usable. Either way the
     walls, the gamma flip and the regime are unavailable, not neutral or zero."""
     live = sum(1 for c in contracts if (c.bid or 0) > 0 or (c.ask or 0) > 0 or (c.iv or 0) > 0)
     usable = cov.valid > 0
@@ -311,17 +242,7 @@ def no_quotes_lead(ticker: str, spot: float, q: dict, cov: G.Coverage, feed: str
     s = f"{ticker} at {fmt_spot(spot, ticker)}."
     band = int(round(config.band("coverage", ticker) * 100))
     if q["reason"] == "no_live_quotes":
-        if feed == "cboe_delayed" and market_open and cal is not None:
-            sess = cal.sessions.get(now.astimezone(NY).date())
-            if sess is not None:
-                opened = datetime.combine(now.astimezone(NY).date(), sess.open, NY)
-                if (now - opened).total_seconds() < config.CBOE_OPEN_GAP_MIN * 60:
-                    by = opened + timedelta(minutes=config.CBOE_FIRST_QUOTES_MIN)
-                    return (f"{s} No usable quotes yet: Cboe's feed runs about {config.CBOE_DELAY_MIN} minutes "
-                            f"behind, so right after the {opened:%H:%M} open it still shows the market before the "
-                            f"open. Quotes usually arrive by about {by:%H:%M} ET.")
-        src = "Cboe's delayed feed" if feed == "cboe_delayed" else "the feed"
-        return f"{s} No usable quotes yet: {src} has no quotes for this chain."
+        return f"{s} No usable quotes yet: the feed has no quotes for this chain."
     if cov.eligible == 0:
         return f"{s} No usable quotes: the selected chain has no contracts within {band}% of spot."
     return (f"{s} No usable quotes: none of the {cov.eligible:,} contracts within {band}% of spot "
@@ -530,7 +451,7 @@ def _oi_source_payload(chain: Chain) -> dict | None:
     if not oi:
         return None
     return {"kind": oi.get("source"), "label": oi.get("label"), "basis": oi.get("basis"),
-            "oi_date": oi.get("oi_date"), "alpaca_oi_date": oi.get("alpaca_oi_date"),
+            "oi_date": oi.get("oi_date"),
             "fallback_reason": oi.get("fallback_reason"), "matched": oi.get("matched"),
             "total": oi.get("total"), "differ_frac": oi.get("differ_frac"), "payload_ts": oi.get("payload_ts")}
 
@@ -745,8 +666,8 @@ def vol_drift(ticker: str, chain: Chain, cal: TradingCalendar, now: datetime, ma
                          "cannot be confirmed.")
         return out
     if chain.spot.basis == "prior_close":
-        # Cboe's file before about 09:45 ET: yesterday's index over pre-open quotes. Never a reading, never a reference.
-        out["reason"] = (f"Unavailable until Cboe's first live {ticker} value, about 09:45 ET: the payload still "
+        # Before the first live value: yesterday's index over pre-open quotes. Never a reading, never a reference.
+        out["reason"] = (f"Unavailable until the first live {ticker} value: the feed still "
                          "carries the prior close.")
         return out
     tgt = _pinned_expiry(ticker, day, chain.contracts, cal)
@@ -781,8 +702,7 @@ def vol_drift(ticker: str, chain: Chain, cal: TradingCalendar, now: datetime, ma
         opened = datetime.combine(day, sess.open, NY) if sess is not None else None
         # Only a reading whose ATM inputs carry a known quote time at or after the open can anchor the session.
         times = [c.iv_ts for c in res.inputs]
-        known = (opened is not None and times and all(t is not None for t in times)
-                 and (chain.feed != "cboe_delayed" or chain.source_ts is not None))
+        known = opened is not None and times and all(t is not None for t in times)
         if market_open and day == ny_today(now) and known and min(times) >= opened and chain.valuation >= opened:
             first = _remember_first(key, res.iv, chain.valuation, max(times))
         else:
@@ -940,97 +860,22 @@ def search(q: str) -> list[dict]:
                  if (c[v].get("family") if v == "okx" else c[v]["prefix"]) and not (sym in config.NO_OPTIONS_COINS)]
         nm = f"{c['name']} options ({' + '.join(lists)})" if lists else f"{c['name']}: no listed options on Deribit or OKX"
         crypto_rows.append({"symbol": sym, "name": nm, "source": "deribit"})
-    if config.is_demo():
-        rows = crypto_rows + _fixture("search.json")
-    else:
-        rows = crypto_rows + [{"symbol": "SPX", "name": "S&P 500 Index", "source": "cboe"},
-                              {"symbol": "NDX", "name": "Nasdaq-100 Index", "source": "cboe"}]
-        try:
-            rows += [dict(a, source="alpaca") for a in AlpacaSource(who="search").assets()]
-        except SourceError:
-            pass
+    rows = crypto_rows
     qu, ql = q.upper(), q.lower()
     sym = [r for r in rows if r["symbol"].upper().startswith(qu)]
     sym.sort(key=lambda r: (r["symbol"].upper() != qu, len(r["symbol"]), r["symbol"]))
     names = [r for r in rows if r not in sym and ql in (r.get("name") or "").lower()]
     names.sort(key=lambda r: r["symbol"])
-    return [{"symbol": r["symbol"], "name": r.get("name", ""), "source": r.get("source", "alpaca")}
+    return [{"symbol": r["symbol"], "name": r.get("name", ""), "source": r.get("source", "deribit")}
             for r in (sym + names)[:10]]
 
 
 def health() -> dict:
     demo = config.is_demo()
     if demo:
-        feeds = {"alpaca_options": None, "stocks": None, "cboe": False}
-        market_open = True
-        rate = {"used_last_min": 0, "cap": config.RATE_CAP_PER_MIN}
         calendar = {"source": "demo", "fetched_at": None, "covered": None, "degraded": False, "last_error": None}
     else:
-        feeds = {"alpaca_options": FEED_STATE["options"], "stocks": FEED_STATE["stocks"], "cboe": True}
-        cal = get_calendar()
-        market_open = cal.market_open(utc_now())
-        calendar = calendar_status(cal)
-        try:
-            used = limiter().used_last_min()
-        except Exception:
-            used = None
-        rate = {"used_last_min": used, "cap": config.RATE_CAP_PER_MIN}
-    return {"status": "ok", "demo": demo, "feeds": feeds, "market_open": market_open,
+        calendar = calendar_status(_CRYPTO_CAL)
+    return {"status": "ok", "demo": demo, "market_open": True,
             "last_frozen_capture": None if demo else last_frozen(),
-            "latest_captures": _demo_latest_captures() if demo else latest_captures(), "rate": rate,
-            "keys_configured": demo or load_credentials() is not None, "calendar": calendar}
-
-
-# ---------------------------------------------------------------- futures view (display transform only)
-
-def futures_view(ticker: str, override_price: float | None = None, override_basis: float | None = None) -> dict:
-    """GET /api/futures. Reads the index's Cboe payload through the map's own cache (same 60 s politeness floor)
-    and, for SPY/QQQ or a live override, Alpaca REST trades. Never touches the map, the recorder or the studies."""
-    from gexlab import futures
-    ticker = ticker.upper()
-    index = config.ETF_INDEX.get(ticker, ticker)
-    if config.is_crypto(ticker):
-        return crypto_futures_view(ticker)
-    if index not in config.FUTURES:
-        raise SourceError("The Futures view covers SPX, NDX, SPY and QQQ", status=404)
-    if config.is_demo():
-        now, cal = demo_as_of(), get_calendar()
-        spots = {t: chain_from_fixture(t).spot.price for t in (index, *[e for e, i in config.ETF_INDEX.items() if i == index])}
-        demo_spot = lambda sym, at=None, lookback_s=None: Spot(spots[sym], now, "demo")   # noqa: E731
-        return futures.build(ticker, now=now, cal=cal, market_open=True,
-                             index_body=futures.demo_payload(index, spots[index], now), trade_at=demo_spot,
-                             latest_trade=demo_spot, override_price=override_price, override_basis=override_basis,
-                             demo=True)
-    now = utc_now()
-    cal = get_calendar(now)
-    trade_at = latest = src = None
-    if load_credentials() is not None:
-        src = AlpacaSource(who="futures")
-        trade_at, latest = src.trade_at, src.latest_trade
-    if index in config.ALPACA_INDEX:
-        # Since Cboe's block (2026-11-20): the map's live parity spot plus Alpaca quotes for the AM options that
-        # settle the futures contract. One snapshots request per refresh.
-        if src is None:
-            raise SourceError(f"The {index} Futures view needs Alpaca keys", status=503)
-        chain, _, _ = cached_chain(index)
-        c = futures.front_contract(index, ny_today(now))
-        S = chain.spot.price
-        lo, hi = S * (1 - config.FUTURES_STRIKE_BAND), S * (1 + config.FUTURES_STRIKE_BAND)
-        feed = chain.feed if chain.feed in ("opra", "indicative") else "indicative"
-        status, snaps = src._snapshots_one(config.FUTURES[index]["option_root"], feed,
-                                           c.expiry - timedelta(days=1), c.expiry, lo, hi)
-        if status != 200:
-            raise SourceError(f"{index} quarterly option quotes unavailable (HTTP {status})", status=status)
-        return futures.build(ticker, now=now, cal=cal, market_open=cal.market_open(now),
-                             payload=futures.alpaca_payload(index, chain.spot, snaps),
-                             trade_at=trade_at, latest_trade=latest, override_price=override_price,
-                             override_basis=override_basis)
-    body, _ = cboe.fetch_raw(index)
-    return futures.build(ticker, now=now, cal=cal, market_open=cal.market_open(now), index_body=body,
-                         trade_at=trade_at, latest_trade=latest, override_price=override_price,
-                         override_basis=override_basis)
-
-
-def crypto_futures_view(ticker: str) -> dict:
-    """Placeholder until the basis block lands (phase 3): the Futures view is not available for crypto yet."""
-    raise SourceError("The Futures view covers SPX, NDX, SPY and QQQ; crypto uses the map's own forwards", status=404)
+            "latest_captures": _demo_latest_captures() if demo else latest_captures(), "calendar": calendar}
