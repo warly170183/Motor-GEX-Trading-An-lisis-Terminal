@@ -464,6 +464,32 @@ def profile_curve(contracts: list[Contract], spot: float, points: int | None = N
     return [{"spot": round(float(s), 4), "net_gex": float(v)} for s, v in zip(grid, vals)]
 
 
+def hedge_flow_bins(profile: list[dict], spot: float, band: float = 0.06) -> dict:
+    """Modeled dealer hedge flow for price moving through each step of the profile curve (|move| <= band of spot).
+
+    net_gex(x) is dollars of delta per 1% move when price sits at x. Crossing a step from x0 to x1 is a move of
+    ln(x1/x0) / 0.01 "percent units" at that step's mean net GEX, and under the model (calls +, puts -) dealers trade the
+    OPPOSITE way to the move when net GEX is positive (sell rallies, buy dips) and WITH it when negative. So per step:
+        flow = -net_gex_mid x ln(x1/x0) / 0.01,    + = dealers buy, - = dealers sell, in dollars of the underlying.
+    `to_up` / `to_down` are the cumulative flows from spot to the band's edges. Linear in each step, a model not a
+    measurement: gamma, IV and open interest all change as price moves."""
+    pts = sorted((p for p in profile if abs(p["spot"] - spot) / spot <= band + 1e-12), key=lambda p: p["spot"])
+    bins = []
+    for a, b in zip(pts, pts[1:]):
+        if a["spot"] <= 0 or b["spot"] <= a["spot"]:
+            continue
+        mid = 0.5 * (a["net_gex"] + b["net_gex"])
+        flow = -mid * math.log(b["spot"] / a["spot"]) / 0.01      # price moving UP through this step
+        if b["spot"] <= spot + 1e-9:
+            flow = -flow                                          # below spot price crosses it going DOWN: the opposite trade
+        bins.append({"lo": a["spot"], "hi": b["spot"], "flow_usd": flow})
+    up = sum(x["flow_usd"] for x in bins if x["lo"] >= spot - 1e-9)
+    down = sum(x["flow_usd"] for x in bins if x["hi"] <= spot + 1e-9)
+    return {"band_pct": band * 100, "bins": bins, "to_up_usd": up, "to_down_usd": down,
+            "method": "Dealer flow per price step = -(net GEX at that price) x the step's size in percent. Positive: dealers "
+                      "buy; negative: sell. Linear model under the calls +, puts - assumption; not a measured flow."}
+
+
 def filter_expiries(contracts: list[Contract], expiries: set[date] | None) -> list[Contract]:
     if not expiries:
         return list(contracts)

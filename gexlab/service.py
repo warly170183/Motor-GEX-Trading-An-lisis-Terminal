@@ -481,6 +481,7 @@ def build_map(ticker: str, expiries: list[str] | None, signed: bool) -> dict:
                    "zero_gamma": lv.zero_gamma, "nearest_zero_gamma": lv.nearest_zero_gamma,
                    "regime": lv.regime if quotes["usable"] else None},
         "profile_curve": prof,
+        "hedge_flow": G.hedge_flow_bins(prof, spot) if crypto else None,
         "frozen_today": (
             {"captured_at": iso_z(chain.as_of), "status": "eligible", "reason": None, "call_wall": lv.call_wall,
              "put_wall": lv.put_wall, "nearest_zero_gamma": lv.nearest_zero_gamma,

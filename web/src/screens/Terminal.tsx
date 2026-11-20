@@ -10,7 +10,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { api } from "../api/client";
-import type { GexMap } from "../api/types";
+import type { GexMap, HedgeFlow } from "../api/types";
 import { CRYPTO_TICKERS, gex, priceDigits, px } from "../lib/format";
 import { useAsync } from "../lib/hooks";
 import "./Terminal.css";
@@ -88,11 +88,14 @@ export default function Terminal({ ticker, onTicker }: Props) {
       </div>
 
       <div className="term-main">
-        <section className="term-chart" aria-label={`${ticker} candles with GEX levels`}>
-          <CandleChart ticker={ticker} bar={bar} data={candles.data} map={m} />
-          {candles.error && <div className="term-msg">{candles.error.message}</div>}
-          {map.error && !m && <div className="term-msg term-msg-2">No GEX levels: {map.error.message}</div>}
-        </section>
+        <div className="term-left">
+          <section className="term-chart" aria-label={`${ticker} candles with GEX levels`}>
+            <CandleChart ticker={ticker} bar={bar} data={candles.data} map={m} />
+            {candles.error && <div className="term-msg">{candles.error.message}</div>}
+            {map.error && !m && <div className="term-msg term-msg-2">No GEX levels: {map.error.message}</div>}
+          </section>
+          {m?.hedge_flow && <HedgeStrip ticker={ticker} hf={m.hedge_flow} spot={m.spot.price} callWall={m.levels.call_wall} putWall={m.levels.put_wall} />}
+        </div>
 
         <aside className="term-side">
           <div className="term-tabs" role="tablist">
@@ -209,6 +212,48 @@ function CandleChart({ ticker, bar, data, map }: { ticker: string; bar: string; 
   }, [map, ticker]);
 
   return <div ref={host} className="term-canvas" />;
+}
+
+/** Modeled dealer hedge flow per price step around spot: green = dealers buy, purple = sell. A model, not a measurement. */
+function HedgeStrip({ ticker, hf, spot, callWall, putWall }: { ticker: string; hf: HedgeFlow; spot: number; callWall: number | null; putWall: number | null }) {
+  const W = 1000, H = 120, mid = H / 2;
+  const lo = spot * (1 - hf.band_pct / 100), hi = spot * (1 + hf.band_pct / 100);
+  const x = (v: number) => ((v - lo) / (hi - lo)) * W;
+  const max = Math.max(1, ...hf.bins.map((b) => Math.abs(b.flow_usd)));
+  const mark = (v: number | null, label: string, color: string) =>
+    v != null && v >= lo && v <= hi ? (
+      <g key={label}>
+        <line x1={x(v)} x2={x(v)} y1={0} y2={H} stroke={color} strokeWidth={1} strokeDasharray="3 3" />
+        <text x={x(v) + 4} y={11} fill={color} fontSize={10} fontFamily="JetBrains Mono, monospace">{label}</text>
+      </g>
+    ) : null;
+  const verb = (v: number) => (v >= 0 ? "buy" : "sell");
+  return (
+    <section className="term-hedge" aria-label="Modeled dealer hedge flow">
+      <div className="term-hedge-head">
+        <b>Dealer hedge flow (model)</b>
+        <span>
+          to {px(hi, ticker)}: dealers {verb(hf.to_up_usd)} ≈ {gex(Math.abs(hf.to_up_usd))} · to {px(lo, ticker)}: {verb(hf.to_down_usd)} ≈ {gex(Math.abs(hf.to_down_usd))}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Bars of modeled dealer buying (green) and selling (purple) at each price step around spot">
+        <line x1={0} x2={W} y1={mid} y2={mid} stroke="#2a2235" />
+        {hf.bins.map((b) => {
+          const h = (Math.abs(b.flow_usd) / max) * (mid - 14);
+          const buy = b.flow_usd >= 0;
+          return (
+            <rect key={b.lo} x={x(b.lo) + 0.5} width={Math.max(1, x(b.hi) - x(b.lo) - 1)} y={buy ? mid - h : mid} height={h} fill={buy ? "#78d202" : "#9b4be8"} opacity={0.85}>
+              <title>{`${px(b.lo, ticker)} to ${px(b.hi, ticker)}: dealers ${verb(b.flow_usd)} ≈ ${gex(Math.abs(b.flow_usd))}`}</title>
+            </rect>
+          );
+        })}
+        {mark(spot, "SPOT", "#ffffff")}
+        {mark(callWall, "CALL", "#78d202")}
+        {mark(putWall, "PUT", "#b57bf0")}
+      </svg>
+      <p className="term-hedge-note">{hf.method}</p>
+    </section>
+  );
 }
 
 function Ladder({ ticker, m, err }: { ticker: string; m: GexMap | null; err?: string }) {

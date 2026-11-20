@@ -219,3 +219,39 @@ def test_fetch_403_is_reported_as_unavailable_not_crash(monkeypatch):
     with pytest.raises(SourceError) as e:
         bybit.fetch_part("BTC", datetime.now(UTC))
     assert "country block" in str(e.value)
+
+
+# ---------------------------------------------------------------- hedge flow strip
+
+def test_hedge_flow_flat_profile_matches_net_gex_per_percent():
+    spot = 100.0
+    prof = [{"spot": spot * (1 + i / 1000), "net_gex": 5e6} for i in range(-200, 201)]     # flat +5M per 1%
+    hf = G.hedge_flow_bins(prof, spot, band=0.06)
+    # moving up +1% -> dealers (long gamma) SELL about 5M x ln(1.01)/0.01 = 4.975M
+    up1 = sum(b["flow_usd"] for b in hf["bins"] if b["lo"] >= spot and b["hi"] <= spot * 1.01 + 1e-9)
+    assert up1 == pytest.approx(-5e6 * 0.995033, rel=0.001)
+    assert hf["to_up_usd"] < 0 < hf["to_down_usd"]          # sells rallies, buys dips
+
+
+def test_hedge_flow_negative_gamma_chases():
+    prof = [{"spot": 100 * (1 + i / 1000), "net_gex": -2e6} for i in range(-100, 101)]
+    hf = G.hedge_flow_bins(prof, 100.0, band=0.05)
+    assert hf["to_up_usd"] > 0 > hf["to_down_usd"]          # buys rallies, sells dips
+
+
+def test_hedge_flow_is_in_the_crypto_map_only(monkeypatch):
+    monkeypatch.setenv("GEXLAB_DEMO", "1")
+    from gexlab import api, service
+    service._CHAINS.clear(); service._LEVEL_CACHE.clear()
+    c = TestClient(api.app, base_url="http://127.0.0.1")
+    m = c.get("/api/map", params={"ticker": "BTC"}).json()
+    hf = m["hedge_flow"]
+    assert hf and len(hf["bins"]) > 10 and hf["bins"][0]["lo"] >= m["spot"]["price"] * 0.94 - 1
+    assert c.get("/api/map", params={"ticker": "SPY"}).json().get("hedge_flow") is None
+
+
+def test_hedge_flow_bins_are_signed_away_from_spot():
+    prof = [{"spot": 100 * (1 + i / 1000), "net_gex": -2e6} for i in range(-100, 101)]    # negative gamma: chase
+    hf = G.hedge_flow_bins(prof, 100.0, band=0.05)
+    assert all(b["flow_usd"] > 0 for b in hf["bins"] if b["lo"] >= 100.0)   # above spot: buy as it rises
+    assert all(b["flow_usd"] < 0 for b in hf["bins"] if b["hi"] <= 100.0)   # below spot: sell as it falls

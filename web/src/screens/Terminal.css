@@ -11,7 +11,8 @@
 .vbadge.ok { color: var(--green); border-color: var(--green-dim); }
 .vbadge.unavailable { color: var(--amber); border-color: var(--amber-dim); }
 .term-main { display: grid; grid-template-columns: minmax(0, 1fr) var(--side); gap: 12px; min-height: 640px; }
-.term-chart { position: relative; border: 1px solid var(--line); border-radius: var(--r); background: #07050b; min-height: 560px; overflow: hidden; }
+.term-left { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.term-chart { position: relative; flex: 1; border: 1px solid var(--line); border-radius: var(--r); background: #07050b; min-height: 560px; overflow: hidden; }
 .term-canvas { position: absolute; inset: 0; }
 .term-msg { position: absolute; left: 12px; top: 10px; z-index: 2; padding: 6px 10px; border-radius: var(--r-s); background: rgba(13, 10, 20, 0.92); border: 1px solid var(--line-2); font-size: 12px; color: var(--text-2); max-width: 70%; }
 .term-msg-2 { top: 46px; color: var(--amber); }
@@ -52,3 +53,8 @@
 .vrow small { color: var(--muted); font-size: 11.5px; }
 .term-note { margin: 0; font-size: 11.5px; color: var(--muted); }
 @media (max-width: 980px) { .term-main { grid-template-columns: 1fr; } .term-chart { min-height: 420px; } .term-badges { margin-left: 0; } }
+.term-hedge { border: 1px solid var(--line); border-radius: var(--r); background: #07050b; padding: 8px 12px 6px; }
+.term-hedge-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; font: 500 11.5px var(--mono); color: var(--text-2); }
+.term-hedge-head b { color: var(--text); }
+.term-hedge svg { width: 100%; height: 120px; display: block; margin-top: 4px; }
+.term-hedge-note { margin: 2px 0 0; font-size: 10.5px; color: var(--muted); }

@@ -135,7 +135,7 @@ The same engine runs on crypto options, with no keys and no account. Open the ap
 Second screen next to the Live map (`#/terminal`): OKX swap candles (5m to 1D) with the map's call wall, put wall and
 gamma flip drawn as price lines, a **MultiMap** ladder (strike, net GEX per 1%, CW/PW/FLIP tags, spot row) for two coins side
 by side, and Levels / Sources tabs. It reads the same `/api/map` as the Live map plus a new `/api/candles` (crypto only,
-OKX public, 20 s cache; demo mode serves recorded candles). Not there yet: hedge-flow strip, expected-range cone, replay.
+OKX public, 20 s cache; demo mode serves recorded candles). The strip under the chart is the modeled dealer hedge flow per price step around spot (green buy, purple sell; a linear model from the map's profile curve, not a measured flow). Not there yet: expected-range cone, replay.
 
 ## Screenshots
 

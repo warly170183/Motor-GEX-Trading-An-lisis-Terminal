@@ -265,6 +265,8 @@ export interface GexMap {
   quotes?: { usable: boolean; reason: "no_live_quotes" | "no_usable_contracts" | null; live: number };
   levels: MapLevels;
   profile_curve: { spot: number; net_gex: number }[];
+  /** Crypto only: modeled dealer flow per price step (+ buy, - sell, dollars). null for equities. */
+  hedge_flow?: HedgeFlow | null;
   frozen_today: FrozenToday | null;
   lead: string;
   warnings: string[];
@@ -637,4 +639,12 @@ export interface Candles {
   bar: "5m" | "15m" | "1H" | "4H" | "1D";
   source: string;
   candles: Candle[];
+}
+
+export interface HedgeFlow {
+  band_pct: number;
+  bins: { lo: number; hi: number; flow_usd: number }[];
+  to_up_usd: number;
+  to_down_usd: number;
+  method: string;
 }
