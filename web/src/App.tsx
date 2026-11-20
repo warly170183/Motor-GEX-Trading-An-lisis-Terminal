@@ -4,9 +4,11 @@ import { DemoContext, MetaContext, PresentContext, type TopMeta } from "./compon
 import UpdateBanner from "./components/UpdateBanner";
 import { useAsync, useHashRoute } from "./lib/hooks";
 import LiveMap from "./screens/LiveMap";
+import Terminal from "./screens/Terminal";
 
 const NAV = [
   { path: "/live", label: "Live map" },
+  { path: "/terminal", label: "Terminal" },
 ];
 
 const PRESENT_KEY = "gexlab.present";
@@ -136,6 +138,7 @@ export default function App() {
               <UpdateBanner hidden={present} />
               <Boundary resetKey={route}>
                 {route === "/live" && !awaitingDefault && <LiveMap key="live" initialTicker={ticker} onTicker={setTicker} />}
+                {route === "/terminal" && !awaitingDefault && <Terminal key="terminal" ticker={ticker} onTicker={setTicker} />}
               </Boundary>
             </main>
 

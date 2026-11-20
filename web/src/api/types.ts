@@ -621,3 +621,20 @@ export interface FuturesView {
   as_of: string;
   demo: boolean;
 }
+
+export interface Candle {
+  t: number; // UTC seconds
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v: number; // coin units
+  confirmed: boolean; // false on the bar still forming
+}
+
+export interface Candles {
+  ticker: string;
+  bar: "5m" | "15m" | "1H" | "4H" | "1D";
+  source: string;
+  candles: Candle[];
+}

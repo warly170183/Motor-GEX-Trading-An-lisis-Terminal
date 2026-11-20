@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 import httpx  # noqa: E402
 
-from gexlab import config, magnitude  # noqa: E402
+from gexlab import candles, config, magnitude  # noqa: E402
 from gexlab.engine.calendar import UTC  # noqa: E402
 from gexlab.sources import deribit, okx  # noqa: E402
 from gexlab.sources.base import Hasher, NoOptions  # noqa: E402
@@ -93,6 +93,13 @@ def main() -> None:
             adv[t] = {**magnitude.adv_from_bars(bars, last), "note": note}
             atr[t] = {**magnitude.atr_from_bars(bars, last), "note": note}
             print(f"{t}: deribit {d[1]} rows, okx {n_okx} rows, spot {d[2]}, ADV {adv[t]['adv_usd']:,.0f}")
+    with httpx.Client(timeout=config.OKX_TIMEOUT_S) as c:                     # recorded candles for the Terminal demo
+        for t in sorted(config.CRYPTO_TICKERS):
+            for bar, okx_bar in candles.BARS.items():
+                r = c.get(f"{config.OKX_BASE}/market/candles", params={"instId": config.CRYPTO_OKX_SWAP[t], "bar": okx_bar, "limit": 300})
+                rows = r.json().get("data") or []
+                if rows:
+                    dump(fx / f"candles_{t}_{bar}.json", rows)
     adv_p.write_text(json.dumps(adv, indent=1) + "\n", "utf-8")
     atr_p.write_text(json.dumps(atr, indent=1) + "\n", "utf-8")
 

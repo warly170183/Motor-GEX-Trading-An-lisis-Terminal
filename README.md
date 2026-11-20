@@ -130,6 +130,13 @@ The same engine runs on crypto options, with no keys and no account. Open the ap
 `GEXLAB_DEMO=1` serves recorded Deribit/OKX snapshots, labeled as such. Refresh them with
 `python tools/snapshot_crypto.py`.
 
+## Terminal screen (crypto)
+
+Second screen next to the Live map (`#/terminal`): OKX swap candles (5m to 1D) with the map's call wall, put wall and
+gamma flip drawn as price lines, a **MultiMap** ladder (strike, net GEX per 1%, CW/PW/FLIP tags, spot row) for two coins side
+by side, and Levels / Sources tabs. It reads the same `/api/map` as the Live map plus a new `/api/candles` (crypto only,
+OKX public, 20 s cache; demo mode serves recorded candles). Not there yet: hedge-flow strip, expected-range cone, replay.
+
 ## Screenshots
 
 **Live map.** GEX by strike around spot, with the walls and the gamma flip marked and the method

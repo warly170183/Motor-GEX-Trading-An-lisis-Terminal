@@ -982,6 +982,18 @@ export async function mockFetch(path: string, init?: RequestInit): Promise<unkno
       };
       return h;
     }
+    case "/api/candles": {
+      const n = Number(p.get("limit") || 300);
+      const stepS = { "5m": 300, "15m": 900, "1H": 3600, "4H": 14400, "1D": 86400 }[p.get("bar") || "15m"] ?? 900;
+      const now = Math.floor(Date.now() / 1000 / stepS) * stepS;
+      let c = 100;
+      const candles = Array.from({ length: n }, (_, i) => {
+        const o = c;
+        c = o * (1 + Math.sin(i / 9) * 0.004 + Math.cos(i / 4) * 0.002);
+        return { t: now - (n - 1 - i) * stepS, o, h: Math.max(o, c) * 1.002, l: Math.min(o, c) * 0.998, c, v: 1000 + (i % 17) * 40, confirmed: i < n - 1 };
+      });
+      return { ticker: p.get("ticker") || "BTC", bar: p.get("bar") || "15m", source: "mock", candles };
+    }
     case "/api/update":
       return { enabled: false, current: "1.1.0", latest: null, available: false, url: "", title: "", checked_at: null, error: null };
     case "/api/tickers":

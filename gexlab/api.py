@@ -16,7 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from gexlab import config, service, update_check
+from gexlab import candles, config, service, update_check
 from gexlab.sources.base import SourceError
 
 log = logging.getLogger("gexlab.api")
@@ -76,6 +76,17 @@ def expirations(ticker: str):
     try:
         return service.expirations(_ticker(ticker))
     except SourceError as e:
+        raise _vendor_error(e)
+
+
+@app.get("/api/candles")
+def get_candles(ticker: str, bar: str = "15m", limit: int = Query(300, ge=10, le=300)):
+    """Price candles (OKX swap) for the Terminal screen. Crypto only."""
+    try:
+        return candles.get_candles(_ticker(ticker), bar, limit)
+    except SourceError as e:
+        if e.status == 400:
+            raise HTTPException(400, str(e))
         raise _vendor_error(e)
 
 
