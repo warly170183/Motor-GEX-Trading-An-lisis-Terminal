@@ -648,3 +648,41 @@ export interface HedgeFlow {
   to_down_usd: number;
   method: string;
 }
+
+export interface FlowRow {
+  t: number;
+  flow_usd: number;
+  call_wall: number | null;
+  put_wall: number | null;
+  flip: number | null;
+  net_gex: number | null;
+  snap_ts: number;
+}
+
+export interface FlowHistory {
+  ticker: string;
+  bar: string;
+  rows: FlowRow[];
+  coverage: { snaps: number; first_ts: number | null; last_ts: number | null };
+  method: string;
+}
+
+export interface SnapshotList {
+  ticker: string;
+  timestamps: number[];
+  recording: boolean;
+}
+
+/** One stored map snapshot (crypto replay). Shaped to feed the same panels as a live map. */
+export interface Snapshot {
+  ticker: string;
+  ts: number;
+  spot: number;
+  levels: MapLevels;
+  totals: { call_gex: number; put_gex: number; net_gex: number };
+  strikes: StrikeRow[];
+  profile: { spot: number; net_gex: number }[];
+  venues: VenueRow[];
+  lead: string | null;
+  hedge_flow: HedgeFlow | null;
+}

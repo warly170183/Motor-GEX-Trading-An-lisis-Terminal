@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ColorType,
   CrosshairMode,
   createChart,
   LineStyle,
+  LineType,
   type IChartApi,
   type IPriceLine,
   type ISeriesApi,
   type UTCTimestamp,
 } from "lightweight-charts";
 import { api } from "../api/client";
-import type { GexMap, HedgeFlow } from "../api/types";
+import type { FlowRow, GexMap, HedgeFlow, Snapshot } from "../api/types";
 import { CRYPTO_TICKERS, gex, priceDigits, px } from "../lib/format";
 import { useAsync } from "../lib/hooks";
 import "./Terminal.css";
@@ -23,6 +24,8 @@ const TABS = [
 ] as const;
 const LADDER_BAND = 0.08; // strikes shown: +-8% of spot
 const REFRESH_MS = 30_000;
+const BAR_S: Record<string, number> = { "5m": 300, "15m": 900, "1H": 3600, "4H": 14400, "1D": 86400 };
+const utc = (ts: number) => new Date(ts * 1000).toISOString().slice(5, 16).replace("T", " ") + " UTC";
 
 /** Reload `fn` on a timer without blanking the screen (useAsync keeps the previous data). */
 function useEvery(reload: () => void, ms: number) {
@@ -39,6 +42,7 @@ interface Props {
 
 export default function Terminal({ ticker, onTicker }: Props) {
   const [bar, setBar] = useState<(typeof BARS)[number]>("15m");
+  const [mainChart, setMainChart] = useState<IChartApi | null>(null);
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("gex");
   const [pair, setPair] = useState(ticker === "BTC" ? "ETH" : "BTC");
   const pairCoin = pair === ticker ? CRYPTO_TICKERS.find((t) => t !== ticker) ?? "ETH" : pair;
@@ -50,10 +54,43 @@ export default function Terminal({ ticker, onTicker }: Props) {
   useEvery(mapB.reload, 60_000);
   useEvery(candles.reload, REFRESH_MS);
 
+  const flow = useAsync(() => api.historyFlow(ticker, bar), [ticker, bar]);
+  const snaps = useAsync(() => api.historySnapshots(ticker, 24), [ticker]);
+  useEvery(flow.reload, 60_000);
+  useEvery(snaps.reload, 60_000);
+  const [replay, setReplay] = useState(false);
+  const [idx, setIdx] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const stamps = snaps.data && snaps.data.ticker === ticker ? snaps.data.timestamps : [];
+  const replayTs = replay && stamps.length ? stamps[Math.min(idx, stamps.length - 1)] : null;
+  const snap = useAsync(() => api.historySnapshot(ticker, replayTs as number), [ticker, replayTs], replayTs !== null);
+  useEffect(() => {
+    setReplay(false);
+    setPlaying(false);
+  }, [ticker]);
+  useEffect(() => {
+    if (!playing) return;
+    const id = window.setInterval(() => setIdx((i) => (i + 1 < stamps.length ? i + 1 : (setPlaying(false), i))), 700);
+    return () => window.clearInterval(id);
+  }, [playing, stamps.length]);
+  const enterReplay = useCallback(() => {
+    setIdx(Math.max(0, stamps.length - 1));
+    setReplay(true);
+  }, [stamps.length]);
+
   const last = candles.data?.candles[candles.data.candles.length - 1];
   const first = candles.data?.candles[0];
   const change = last && first ? ((last.c - first.o) / first.o) * 100 : null;
-  const m = map.data && map.data.ticker === ticker ? map.data : null; // useAsync keeps the previous coin's data while loading
+  const live = map.data && map.data.ticker === ticker ? map.data : null; // useAsync keeps the previous coin's data while loading
+  const sd: Snapshot | null = replayTs !== null && snap.data && snap.data.ticker === ticker ? snap.data : null;
+  // while replaying, every panel reads the stored snapshot instead of the live map
+  const m: GexMap | null = sd
+    ? ({
+        ticker, spot: { price: sd.spot, ts: "", source: "snapshot" }, levels: sd.levels, totals: sd.totals, strikes: sd.strikes,
+        venues: sd.venues, lead: `Replay: ${sd.lead ?? ""}`, warnings: [`Stored snapshot from ${utc(sd.ts)}, not live.`],
+        hedge_flow: sd.hedge_flow, oi_source: null,
+      } as unknown as GexMap)
+    : live;
 
   return (
     <div className="term">
@@ -78,7 +115,7 @@ export default function Terminal({ ticker, onTicker }: Props) {
           ))}
         </div>
         <div className="term-badges">
-          {m?.venues?.map((v) => (
+          {live?.venues?.map((v) => (
             <span key={v.name} className={`vbadge ${v.status}`} title={v.error ?? undefined}>
               {v.label}
               {v.status === "ok" && v.gex_share_pct != null ? ` ${v.gex_share_pct.toFixed(0)}%` : v.status === "no_options" ? " no options" : v.status === "unavailable" ? " down" : ""}
@@ -87,13 +124,38 @@ export default function Terminal({ ticker, onTicker }: Props) {
         </div>
       </div>
 
+      <div className="term-replay">
+        {!replay ? (
+          <>
+            <button type="button" className="chip" onClick={enterReplay} disabled={!stamps.length}>Replay</button>
+            <span className="term-sub">
+              {stamps.length
+                ? `${stamps.length} snapshots in the last 24 h · from ${utc(stamps[0])}`
+                : snaps.data?.recording
+                  ? "Recording: the first snapshot lands within 5 minutes. History starts when recording starts; nothing is back-filled."
+                  : "No snapshots stored. The app records the GEX map every 5 min while it runs (GEXLAB_RECORD=0 turns that off)."}
+            </span>
+          </>
+        ) : (
+          <>
+            <button type="button" className="chip on" onClick={() => { setReplay(false); setPlaying(false); }}>Live</button>
+            <button type="button" className="chip" onClick={() => setIdx((i) => Math.max(0, i - 1))} aria-label="Previous snapshot">‹</button>
+            <button type="button" className="chip" onClick={() => setPlaying((p) => !p)} aria-pressed={playing}>{playing ? "Pause" : "Play"}</button>
+            <button type="button" className="chip" onClick={() => setIdx((i) => Math.min(stamps.length - 1, i + 1))} aria-label="Next snapshot">›</button>
+            <input type="range" min={0} max={Math.max(0, stamps.length - 1)} value={Math.min(idx, stamps.length - 1)} onChange={(e) => { setPlaying(false); setIdx(Number(e.target.value)); }} aria-label="Snapshot time" />
+            <b className="term-replay-at">{replayTs ? utc(replayTs) : ""}</b>
+          </>
+        )}
+      </div>
+
       <div className="term-main">
         <div className="term-left">
           <section className="term-chart" aria-label={`${ticker} candles with GEX levels`}>
-            <CandleChart ticker={ticker} bar={bar} data={candles.data} map={m} />
+            <CandleChart ticker={ticker} bar={bar} data={candles.data} map={m} flows={flow.data?.rows ?? []} replayTs={replayTs} onChart={setMainChart} />
             {candles.error && <div className="term-msg">{candles.error.message}</div>}
             {map.error && !m && <div className="term-msg term-msg-2">No GEX levels: {map.error.message}</div>}
           </section>
+          <FlowChart bar={bar} rows={flow.data?.rows ?? []} coverage={flow.data?.coverage} main={mainChart} err={flow.error?.message} />
           {m?.hedge_flow && <HedgeStrip ticker={ticker} hf={m.hedge_flow} spot={m.spot.price} callWall={m.levels.call_wall} putWall={m.levels.put_wall} />}
         </div>
 
@@ -133,7 +195,7 @@ export default function Terminal({ ticker, onTicker }: Props) {
   );
 }
 
-function CandleChart({ ticker, bar, data, map }: { ticker: string; bar: string; data: import("../api/types").Candles | null; map: GexMap | null }) {
+function CandleChart({ ticker, bar, data, map, flows, replayTs, onChart }: { ticker: string; bar: string; data: import("../api/types").Candles | null; map: GexMap | null; flows: FlowRow[]; replayTs: number | null; onChart: (c: IChartApi | null) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const candle = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -142,6 +204,8 @@ function CandleChart({ ticker, bar, data, map }: { ticker: string; bar: string; 
   const fitted = useRef("");
   const spotRef = useRef<number | null>(null);
   const levelPx = useRef<number[]>([]);
+  const callHist = useRef<ISeriesApi<"Line"> | null>(null);
+  const putHist = useRef<ISeriesApi<"Line"> | null>(null);
 
   useEffect(() => {
     if (!host.current) return;
@@ -167,13 +231,32 @@ function CandleChart({ ticker, bar, data, map }: { ticker: string; bar: string; 
     });
     vol.current = c.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "vol", color: "#3a3046" });
     c.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    callHist.current = c.addLineSeries({ color: "rgba(120,210,2,0.55)", lineWidth: 1, lineType: LineType.WithSteps, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    putHist.current = c.addLineSeries({ color: "rgba(181,123,240,0.65)", lineWidth: 1, lineType: LineType.WithSteps, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     chart.current = c;
+    onChart(c);
     return () => {
+      onChart(null);
       c.remove();
-      chart.current = candle.current = vol.current = null;
+      chart.current = candle.current = vol.current = callHist.current = putHist.current = null;
       lines.current = [];
     };
   }, []);
+
+  useEffect(() => {
+    // wall history as step lines (what the walls were, candle by candle), plus the replay cursor
+    const up = flows.filter((f) => f.call_wall != null).map((f) => ({ time: f.t as UTCTimestamp, value: f.call_wall as number }));
+    const dn = flows.filter((f) => f.put_wall != null).map((f) => ({ time: f.t as UTCTimestamp, value: f.put_wall as number }));
+    callHist.current?.setData(up);
+    putHist.current?.setData(dn);
+  }, [flows]);
+
+  useEffect(() => {
+    const s = candle.current;
+    if (!s) return;
+    const step = BAR_S[bar] ?? 900;
+    s.setMarkers(replayTs == null ? [] : [{ time: (Math.floor(replayTs / step) * step) as UTCTimestamp, position: "aboveBar", color: "#ffffff", shape: "arrowDown", text: "replay" }]);
+  }, [replayTs, bar, data]);
 
   useEffect(() => {
     const dp = priceDigits(ticker);
@@ -212,6 +295,67 @@ function CandleChart({ ticker, bar, data, map }: { ticker: string; bar: string; 
   }, [map, ticker]);
 
   return <div ref={host} className="term-canvas" />;
+}
+
+/** Per-candle modeled hedge flow from the recorded snapshots, on its own chart synced to the candles' time axis. */
+function FlowChart({ bar, rows, coverage, main, err }: { bar: string; rows: FlowRow[]; coverage?: { snaps: number; first_ts: number | null }; main: IChartApi | null; err?: string }) {
+  const host = useRef<HTMLDivElement>(null);
+  const chart = useRef<IChartApi | null>(null);
+  const series = useRef<ISeriesApi<"Histogram"> | null>(null);
+
+  useEffect(() => {
+    if (!host.current) return;
+    const c = createChart(host.current, {
+      autoSize: true,
+      layout: { background: { type: ColorType.Solid, color: "#07050b" }, textColor: "#8a8f98", fontFamily: "JetBrains Mono, monospace", fontSize: 10 },
+      grid: { vertLines: { color: "#14101a" }, horzLines: { color: "#14101a" } },
+      rightPriceScale: { borderColor: "#2a2235", minimumWidth: 70 },
+      timeScale: { borderColor: "#2a2235", timeVisible: true, secondsVisible: false, visible: false },
+      crosshair: { mode: CrosshairMode.Normal },
+      handleScroll: false,
+      handleScale: false,
+    });
+    series.current = c.addHistogramSeries({ priceFormat: { type: "custom", formatter: (v: number) => gex(v, { sign: true }) }, priceLineVisible: false });
+    chart.current = c;
+    return () => {
+      c.remove();
+      chart.current = series.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    series.current?.setData(rows.map((r) => ({ time: r.t as UTCTimestamp, value: r.flow_usd, color: r.flow_usd >= 0 ? "rgba(120,210,2,0.8)" : "rgba(155,75,232,0.85)" })));
+  }, [rows]);
+
+  useEffect(() => {
+    if (!main || !chart.current) return;
+    const c = chart.current;
+    const sync = (r: { from: unknown; to: unknown } | null) => {
+      if (!r) return;
+      try {
+        c.timeScale().setVisibleRange(r as { from: UTCTimestamp; to: UTCTimestamp });
+      } catch {
+        /* the flow series covers less time than the candles: nothing to align yet */
+      }
+    };
+    main.timeScale().subscribeVisibleTimeRangeChange(sync);
+    sync(main.timeScale().getVisibleRange());
+    return () => main.timeScale().unsubscribeVisibleTimeRangeChange(sync);
+  }, [main, rows]);
+
+  return (
+    <section className="term-flow" aria-label="Modeled hedge flow per candle">
+      <div className="term-hedge-head">
+        <b>Hedge flow per candle ({bar}, model)</b>
+        <span>
+          {rows.length
+            ? `${rows.length} candles from ${coverage?.snaps ?? 0} snapshots · green buy, purple sell · walls drawn as step lines`
+            : err ?? "No history yet: the app saves the GEX map every 5 min while it runs; candles before that stay empty."}
+        </span>
+      </div>
+      <div ref={host} className="term-flow-canvas" />
+    </section>
+  );
 }
 
 /** Modeled dealer hedge flow per price step around spot: green = dealers buy, purple = sell. A model, not a measurement. */

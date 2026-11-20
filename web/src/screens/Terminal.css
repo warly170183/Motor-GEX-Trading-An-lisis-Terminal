@@ -58,3 +58,8 @@
 .term-hedge-head b { color: var(--text); }
 .term-hedge svg { width: 100%; height: 120px; display: block; margin-top: 4px; }
 .term-hedge-note { margin: 2px 0 0; font-size: 10.5px; color: var(--muted); }
+.term-replay { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-height: 32px; }
+.term-replay input[type="range"] { flex: 1 1 220px; max-width: 520px; accent-color: var(--green); }
+.term-replay-at { font: 600 12px var(--mono); }
+.term-flow { border: 1px solid var(--line); border-radius: var(--r); background: #07050b; padding: 8px 12px 6px; }
+.term-flow-canvas { height: 110px; margin-top: 4px; }

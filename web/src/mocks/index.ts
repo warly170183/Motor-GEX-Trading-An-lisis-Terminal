@@ -994,6 +994,10 @@ export async function mockFetch(path: string, init?: RequestInit): Promise<unkno
       });
       return { ticker: p.get("ticker") || "BTC", bar: p.get("bar") || "15m", source: "mock", candles };
     }
+    case "/api/history/flow":
+      return { ticker: p.get("ticker") || "BTC", bar: p.get("bar") || "15m", rows: [], coverage: { snaps: 0, first_ts: null, last_ts: null }, method: "mock" };
+    case "/api/history/snapshots":
+      return { ticker: p.get("ticker") || "BTC", timestamps: [], recording: false };
     case "/api/update":
       return { enabled: false, current: "1.1.0", latest: null, available: false, url: "", title: "", checked_at: null, error: null };
     case "/api/tickers":

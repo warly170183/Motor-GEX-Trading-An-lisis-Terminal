@@ -16,7 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from gexlab import candles, config, service, update_check
+from gexlab import candles, config, history, service, update_check
 from gexlab.sources.base import SourceError
 
 log = logging.getLogger("gexlab.api")
@@ -25,7 +25,9 @@ log = logging.getLogger("gexlab.api")
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     update_check.start_background_check()      # at most once a day, silent offline, GEXLAB_NO_UPDATE_CHECK=1 skips it
+    history.start_recorder()                   # crypto GEX snapshots every 5 min; GEXLAB_RECORD=0 turns it off
     yield
+    history.stop_recorder()
 
 
 app = FastAPI(title="Edge GEX Lab", version=config.MODEL_VERSION, lifespan=_lifespan)
@@ -88,6 +90,41 @@ def get_candles(ticker: str, bar: str = "15m", limit: int = Query(300, ge=10, le
         if e.status == 400:
             raise HTTPException(400, str(e))
         raise _vendor_error(e)
+
+
+@app.get("/api/history/flow")
+def history_flow(ticker: str, bar: str = "15m", limit: int = Query(300, ge=10, le=300)):
+    """Per-candle modeled hedge flow and level history from the recorded snapshots (crypto)."""
+    t = _ticker(ticker)
+    try:
+        c = candles.get_candles(t, bar, limit)
+    except SourceError as e:
+        if e.status == 400:
+            raise HTTPException(400, str(e))
+        raise _vendor_error(e)
+    bar_s = {"5m": 300, "15m": 900, "1H": 3600, "4H": 14400, "1D": 86400}[bar]
+    return {"ticker": t, "bar": bar, **history.candle_flows(t, c["candles"], bar_s),
+            "method": "Modeled hedge for each candle's realized move (open to close) along the profile curve of the snapshot "
+                      "taken nearest to the candle. Candles with no snapshot are left out. Not a measured flow."}
+
+
+@app.get("/api/history/snapshots")
+def history_snapshots(ticker: str, hours: int = Query(24, ge=1, le=24 * 30)):
+    t = _ticker(ticker)
+    if not config.is_crypto(t):
+        raise HTTPException(404, "History covers the crypto coins only")
+    import time as _t
+    return {"ticker": t, "timestamps": history.timestamps(t, int(_t.time()) - hours * 3600),
+            "recording": history.is_recording()}
+
+
+@app.get("/api/history/snapshot")
+def history_snapshot(ticker: str, ts: int):
+    t = _ticker(ticker)
+    snap = history.snapshot(t, ts)
+    if snap is None:
+        raise HTTPException(404, "No snapshot at or before that time")
+    return snap
 
 
 @app.get("/api/map")

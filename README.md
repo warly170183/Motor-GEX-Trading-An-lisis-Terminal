@@ -137,6 +137,21 @@ gamma flip drawn as price lines, a **MultiMap** ladder (strike, net GEX per 1%, 
 by side, and Levels / Sources tabs. It reads the same `/api/map` as the Live map plus a new `/api/candles` (crypto only,
 OKX public, 20 s cache; demo mode serves recorded candles). The strip under the chart is the modeled dealer hedge flow per price step around spot (green buy, purple sell; a linear model from the map's profile curve, not a measured flow). Not there yet: expected-range cone, replay.
 
+### History, per-candle flow and replay
+
+While the app runs live it saves each crypto coin's GEX map every 5 minutes (`gexlab/history.py`, table `crypto_snaps` in
+`data/gexlab.db`, about 5 MB a day, kept 14 days). From those snapshots the Terminal draws:
+
+- **Hedge flow per candle:** the modeled hedge for each candle's realized move (open to close) along the profile curve of the
+  snapshot nearest to that candle. Green dealers buy, purple sell. A model, not a measured flow.
+- **Wall history:** call and put walls as step lines on the candles.
+- **Replay:** a slider over the stored snapshots; the ladder, levels, sources and hedge strip show that moment, with a marker on
+  the candle.
+
+History starts the day recording starts: venues' public APIs give no open-interest history, so nothing is back-filled or
+invented, and candles with no snapshot stay empty. `GEXLAB_RECORD=0` turns recording off, `GEXLAB_RECORD_EVERY_S` changes the
+period, `GEXLAB_SNAP_DAYS` the retention. `python -m gexlab.history` stores one snapshot now. Demo mode never records.
+
 ## Screenshots
 
 **Live map.** GEX by strike around spot, with the walls and the gamma flip marked and the method

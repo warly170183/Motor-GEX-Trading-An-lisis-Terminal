@@ -464,6 +464,27 @@ def profile_curve(contracts: list[Contract], spot: float, points: int | None = N
     return [{"spot": round(float(s), 4), "net_gex": float(v)} for s, v in zip(grid, vals)]
 
 
+def hedge_flow_move(profile: list[dict], s0: float, s1: float, steps: int = 60) -> float | None:
+    """Modeled dealer hedge flow, in dollars (+ buy, - sell), for price moving from s0 to s1 along the profile curve.
+
+    flow = -( integral of net_gex(x) d ln x ) / 0.01 from s0 to s1. The sign of d ln x makes a fall come out as the opposite
+    trade to a rise. Moves outside the curve's range are clamped to it. None when the curve cannot cover the move.
+    A model on the snapshot's own gamma, not a measured flow."""
+    pts = sorted((p["spot"], p["net_gex"]) for p in profile if p.get("spot") and p["spot"] > 0)
+    if len(pts) < 3 or s0 <= 0 or s1 <= 0:
+        return None
+    xs = np.log([p[0] for p in pts]); ys = np.array([p[1] for p in pts], dtype=float)
+    a, b = math.log(s0), math.log(s1)
+    lo, hi = xs[0], xs[-1]
+    a, b = min(max(a, lo), hi), min(max(b, lo), hi)
+    if a == b:
+        return 0.0
+    g = np.linspace(a, b, steps + 1)
+    n = np.interp(g, xs, ys)
+    trapz = getattr(np, "trapezoid", None) or np.trapz     # numpy 2 renamed trapz
+    return float(-trapz(n, g) / 0.01)
+
+
 def hedge_flow_bins(profile: list[dict], spot: float, band: float = 0.06) -> dict:
     """Modeled dealer hedge flow for price moving through each step of the profile curve (|move| <= band of spot).
 

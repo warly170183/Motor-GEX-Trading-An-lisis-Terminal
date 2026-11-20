@@ -1,5 +1,8 @@
 import type {
   Candles,
+  FlowHistory,
+  Snapshot,
+  SnapshotList,
   CaptureRow,
   Expirations,
   FuturesView,
@@ -73,6 +76,9 @@ export const api = {
   map: (ticker: string, expiries: string[], signed: boolean) =>
     http<GexMap>(`/api/map?${q({ ticker, expiries: expiries.join(","), signed })}`),
   candles: (ticker: string, bar: string, limit = 300) => http<Candles>(`/api/candles?${q({ ticker, bar, limit })}`),
+  historyFlow: (ticker: string, bar: string, limit = 300) => http<FlowHistory>(`/api/history/flow?${q({ ticker, bar, limit })}`),
+  historySnapshots: (ticker: string, hours = 24) => http<SnapshotList>(`/api/history/snapshots?${q({ ticker, hours })}`),
+  historySnapshot: (ticker: string, ts: number) => http<Snapshot>(`/api/history/snapshot?${q({ ticker, ts })}`),
   captures: (ticker: string, days: number) => http<CaptureRow[]>(`/api/captures?${q({ ticker, days })}`),
   replay: (ticker: string, date: string) => http<Replay>(`/api/replay?${q({ ticker, date })}`),
   recap: (ticker: string, date: string) => http<Recap>(`/api/recap?${q({ ticker, date })}`),
