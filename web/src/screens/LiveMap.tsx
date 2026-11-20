@@ -1601,7 +1601,7 @@ function StructureSection({ m }: { m: GexMap | null }) {
         <span className="c">{"1 sigma = F · ATM IV · sqrt(T)"}</span>
       </div>
       <p>{st?.method ?? "Second-order exposures and chain structure from the same open interest, IV and clock as GEX."}</p>
-      <p>{st?.caveat ?? "Display only, context and not a signal."}</p>
+      <p>{st?.caveat ?? "Display only: context for reading the map."}</p>
       {st && st.available && (
         <dl className="kv">
           {st.vex_net_usd != null && (

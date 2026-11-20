@@ -586,7 +586,7 @@ def _dex(sel: list[Contract], spot: float, chain: Chain, usable: bool) -> dict |
             "method": DEX_METHOD_CRYPTO if config.is_crypto(chain.ticker) else DEX_METHOD}
 
 
-STRUCTURE_CAVEAT = ("Display only, context and not a signal. VEX and CEX use the same dealer-sign assumption as GEX (dealers long "
+STRUCTURE_CAVEAT = ("Display only: context for reading the map. VEX and CEX use the same dealer-sign assumption as GEX (dealers long "
                     "calls, short puts), which open interest cannot confirm. Max pain, the put/call ratio and the points of "
                     "control read open interest as it stands; the expected move and the 25-delta skew read implied volatility "
                     "as quoted. None of these is tested against outcomes here.")
