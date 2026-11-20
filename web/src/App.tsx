@@ -95,7 +95,7 @@ export default function App() {
   const demo = MOCK || health.data?.demo === true;
   const [present, togglePresent] = usePresentMode();
 
-  // No ticker in the URL: BTC (Deribit needs no keys, so this map always loads).
+  // No ticker in the URL: BTC (Deribit needs no keys, so this map always loads; equities need Alpaca keys).
   const ticker = (params.get("ticker") || "BTC").toUpperCase();
   const awaitingDefault = !params.get("ticker") && health.loading;
   const route = NAV.some((n) => n.path === path) ? path : "/live";

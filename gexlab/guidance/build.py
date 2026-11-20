@@ -58,7 +58,7 @@ def r2(x: float | None) -> float | None:
 def is_index(ticker: str | None) -> bool:
     """SPX, NDX and BTC quote in whole numbers (index points, or whole dollars on a $60,000 coin): every PRICE is
     a whole number. The name is historical; it is the rounding switch."""
-    return ticker in config.CBOE_TICKERS or (config.is_crypto(ticker)
+    return ticker in config.INDEX_TICKERS or (config.is_crypto(ticker)
                                              and config.CRYPTO_PX_DECIMALS.get((ticker or "").upper(), 2) == 0)
 
 

@@ -186,6 +186,33 @@ export interface VolDrift {
 }
 
 /** DEX: delta * OI * 100 * spot over the selected expiries. net = calls minus puts (put delta is negative), plus unsigned sides. */
+/** Chain structure and second-order exposures (display only). Absent from older payloads; null when it could not be built. */
+export interface Structure {
+  available: boolean;
+  /** USD of dealer delta per +1 volatility point, signed (dealers long calls, short puts). */
+  vex_net_usd: number | null;
+  vex_abs_usd: number | null;
+  /** USD of dealer delta lost per calendar day, signed. */
+  cex_net_usd_day: number | null;
+  cex_abs_usd_day: number | null;
+  contracts: number;
+  pcr_oi: number | null;
+  call_oi: number;
+  put_oi: number;
+  gex_poc: number | null;
+  oi_poc: number | null;
+  /** Cumulative-GEX zero cross: a cruder cross-check of the swept gamma flip. */
+  cum_zero: number | null;
+  max_pain: { expiry: string; strike: number; distance_pct: number; oi: number }[];
+  expected_move: { expiry: string; days: number; iv: number; sigma_abs: number; sigma_pct: number; low: number; high: number } | null;
+  /** IV of the 25-delta call minus IV of the 25-delta put, decimal; negative = puts richer. */
+  rr25: number | null;
+  rr25_expiry: string | null;
+  oi_date: string | null;
+  caveat: string;
+  method: string;
+}
+
 export interface Dex {
   available: boolean;
   reason: string | null;
@@ -229,7 +256,7 @@ export interface GexMap {
   model_version: string;
   /** basis: last_trade (in session), regular_close (market closed: official session close), payload (Cboe),
    *  prior_close (Cboe with the market open but the index value from before today's open; ts is the index's own time). */
-  spot: { price: number; ts: string; source: string; basis?: "last_trade" | "regular_close" | "payload" | "prior_close" };
+  spot: { price: number; ts: string; source: string; basis?: "last_trade" | "regular_close" | "payload" | "prior_close" | "parity" };
   /** The one clock T is measured from. label is set only when the market is closed. */
   valuation?: { ts: string; basis: "quote_time" | "session_close"; label: string | null };
   feed: { kind: FeedKind; label: string; stale: boolean; market_open: boolean; last_success: string | null; data_ts?: string | null };
@@ -260,6 +287,7 @@ export interface GexMap {
   /** null only when the block could not be built; absent from older payloads. */
   vol_drift?: VolDrift | null;
   dex?: Dex | null;
+  structure?: Structure | null;
   /** usable false: no valid contract within 10% of spot, so the levels are unavailable, not neutral or zero.
    *  reason "no_live_quotes": no bid, ask or IV anywhere in the selection (Cboe's first minutes after the open). */
   quotes?: { usable: boolean; reason: "no_live_quotes" | "no_usable_contracts" | null; live: number };
@@ -268,8 +296,34 @@ export interface GexMap {
   /** Crypto only: modeled dealer flow per price step (+ buy, - sell, dollars). null for equities. */
   hedge_flow?: HedgeFlow | null;
   frozen_today: FrozenToday | null;
+  /** SPX/NDX only (null otherwise): the index now, estimated from the live SPY/QQQ trade, because Cboe's value runs
+   *  about 15 minutes behind. The readings (regime ... at_flip) are present only when available and quotes are usable. */
+  live_spot?: LiveSpot | null;
+  /** Today's 10:00 frozen capture is missing, late or invalid: the reason in plain words. Null or absent when fine. */
+  capture_alert?: { kind: "missing" | "late" | "invalid"; text: string } | null;
   lead: string;
   warnings: string[];
+}
+
+export interface LiveSpot {
+  available: boolean;
+  reason: string | null;
+  etf: string;
+  delayed_price: number;
+  delayed_time: string | null;
+  price?: number;
+  ts?: string;
+  age_s?: number;
+  diff?: number;
+  diff_pct?: number | null;
+  method?: string | null;
+  regime?: "positive" | "negative" | "neutral";
+  call_gex?: number;
+  put_gex?: number;
+  net_gex?: number;
+  nearest_zero_gamma?: number | null;
+  at_flip?: boolean;
+  flip_band?: number;
 }
 
 export interface CaptureRow {
@@ -576,6 +630,8 @@ export interface FuturesParity {
   usable_pairs: number;
   spread: number | null;
   option_root: string;
+  /** alpaca: live parity spot and Alpaca quotes (SPX since 2026-11-20); cboe: the delayed Cboe file. */
+  source?: "alpaca" | "cboe";
   option_expiry: string | null;
   settlement: "AM";
   as_of: string | null;

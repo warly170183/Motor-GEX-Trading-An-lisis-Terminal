@@ -302,6 +302,13 @@ function CandleChart({ ticker, bar, data, map, flows, replayTs, onChart }: { tic
     add(lv.call_wall, "CALL WALL", "#78d202", LineStyle.Solid);
     add(lv.put_wall, "PUT WALL", "#b57bf0", LineStyle.Solid);
     add(lv.nearest_zero_gamma, "FLIP", "#c9a25e", LineStyle.Dashed);
+    // Context lines from the structure block: max pain of the nearest expiry and the 1 sigma expected move.
+    const st = map?.ticker === ticker ? map.structure : null;
+    if (st?.available) {
+      add(st.max_pain[0]?.strike, "MAX PAIN", "#8a8f98", LineStyle.Dotted);
+      add(st.expected_move?.high, "+1σ", "#5aa6d6", LineStyle.Dotted);
+      add(st.expected_move?.low, "−1σ", "#5aa6d6", LineStyle.Dotted);
+    }
   }, [map, ticker]);
 
   return <div ref={host} className="term-canvas" />;

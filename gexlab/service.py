@@ -13,11 +13,12 @@ import logging
 from gexlab import config, magnitude, store
 from gexlab.engine import dex as DX
 from gexlab.engine import gex as G
+from gexlab.engine import structure as ST
 from gexlab.engine import voldrift as VD
 from gexlab.engine.calendar import (NY, UTC, CryptoCalendar, TradingCalendar, crypto_expiry_kind, expiry_kind, iso_z,
                                     ny_today, settlement_dt, utc_now, utc_today, valuation_label)
 from gexlab.models import Chain, Contract, Spot
-from gexlab.sources import cboe, crypto as crypto_src, deribit, okx
+from gexlab.sources import cboe, crypto as crypto_src, deribit, occ, okx
 from gexlab.sources.alpaca import FEED_STATE, AlpacaSource, load_credentials
 from gexlab.sources.base import SourceError, limiter
 
@@ -183,8 +184,12 @@ def fetch_chain(ticker: str, priority: str = "low", now: datetime | None = None,
                                   respect_cooldown=not recorder)
         else:
             src = AlpacaSource(priority=priority, who="recorder" if recorder else "api")
-            overlay = ((lambda t, cs, at, cl, h: cboe.apply_oi(t, cs, at, cl, h, respect_cooldown=not recorder))
-                       if config.OI_SOURCE == "cboe" else None)
+            if config.OI_SOURCE == "occ":
+                overlay = occ.apply_oi
+            elif config.OI_SOURCE == "cboe" and ticker not in config.ALPACA_INDEX:
+                overlay = (lambda t, cs, at, cl, h: cboe.apply_oi(t, cs, at, cl, h, respect_cooldown=not recorder))
+            else:
+                overlay = None
             ch = src.fetch_chain(ticker, now, cal, strict=strict, oi_overlay=overlay)
     ch.contracts = G.finalize(ch.contracts, ch.spot.price, ch.valuation, cal)   # T from the valuation clock
     return ch
@@ -237,7 +242,7 @@ def fmt_px(x: float | None, ticker: str) -> str:
         return "n/a"
     if config.is_crypto(ticker):
         return _crypto_fmt(x, ticker)
-    if ticker in config.CBOE_TICKERS:
+    if ticker in config.INDEX_TICKERS:
         return f"{math.floor(x + 0.5):,}"  # index points: whole numbers, halves up like the web
     return f"{x:.2f}".rstrip("0").rstrip(".") if x != int(x) else f"{int(x)}"
 
@@ -245,7 +250,7 @@ def fmt_px(x: float | None, ticker: str) -> str:
 def fmt_spot(x: float, ticker: str = "") -> str:
     if config.is_crypto(ticker):
         return _crypto_fmt(x, ticker)
-    if ticker in config.CBOE_TICKERS:
+    if ticker in config.INDEX_TICKERS:
         return f"{math.floor(x + 0.5):,}"  # index points: whole numbers, halves up
     return f"{x:,.2f}"
 
@@ -257,11 +262,14 @@ def fmt_date_short(iso: str | None) -> str | None:
     return f"{d.strftime('%b')} {d.day}"
 
 
-def lead_sentence(ticker: str, spot: float, lv: G.Levels, coverage_pct: float, prior_close: bool = False) -> str:
+def lead_sentence(ticker: str, spot: float, lv: G.Levels, coverage_pct: float, prior_close: bool = False,
+                  live_etf: str | None = None) -> str:
     """Plain-English, data-derived, descriptive only (no signal words). One line at 1920 px:
     the coverage rule detail lives in the coverage panel and the method drawer, not here.
-    Vocabulary: always "gamma flip", never "flip" alone or "zero gamma"."""
+    Vocabulary: always "gamma flip", never "flip" alone or "zero gamma".
+    live_etf: spot is a live estimate from that ETF, and lv carries the gamma flip and regime read at it."""
     s = (f"{ticker} at its prior close ({fmt_spot(spot, ticker)})" if prior_close
+         else f"{ticker} near {fmt_spot(spot, ticker)} (live, from {live_etf})" if live_etf
          else f"{ticker} at {fmt_spot(spot, ticker)}")
     parts = []
     if lv.nearest_zero_gamma is not None:
@@ -377,6 +385,8 @@ def build_map(ticker: str, expiries: list[str] | None, signed: bool) -> dict:
     call_tot = sum(c.gex for c in sel if c.valid and c.type == "call")
     put_tot = sum(c.gex for c in sel if c.valid and c.type == "put")
     put_tot_out = _signed(put_tot, signed)
+    live, lead_lv, lead_spot = None, lv, spot
+
 
     kind = chain.feed
     val_label = None
@@ -444,7 +454,7 @@ def build_map(ticker: str, expiries: list[str] | None, signed: bool) -> dict:
     if slot.error and stale:
         warnings.append("Last refresh failed; showing the previous successful chain.")
 
-    return {
+    out = {
         "ticker": ticker,
         "as_of": iso_z(chain.as_of),
         "model_version": config.MODEL_VERSION,
@@ -476,6 +486,7 @@ def build_map(ticker: str, expiries: list[str] | None, signed: bool) -> dict:
                    "net_gex": call_tot + put_tot_out},
         "magnitude": _magnitude(ticker, chain, call_tot, put_tot, spot, cal, now),
         "dex": _dex(sel, spot, chain, quotes["usable"]),
+        "structure": _structure(sel, spot, chain, quotes["usable"]),
         "vol_drift": None if crypto else _vol_drift(ticker, chain, cal, now, market_open,
                                                     lv.regime if quotes["usable"] else None),
         "quotes": quotes,
@@ -491,10 +502,13 @@ def build_map(ticker: str, expiries: list[str] | None, signed: bool) -> dict:
              "oi_source": chain.oi_source, "expiries": sorted({c.expiry.isoformat() for c in chain.contracts}),
              "excluded": None}
             if config.is_demo() else None if crypto else frozen_today(ticker, ny_today(now))),
-        "lead": (lead_sentence(ticker, spot, lv, pct, chain.spot.basis == "prior_close") if quotes["usable"] else
+        "live_spot": live,
+        "lead": (lead_sentence(ticker, lead_spot, lead_lv, pct, chain.spot.basis == "prior_close",
+                               live_etf=live["etf"] if lead_spot != spot else None) if quotes["usable"] else
                  no_quotes_lead(ticker, spot, quotes, cov, kind, None if config.is_demo() else cal, now, market_open)),
         "warnings": warnings,
     }
+    return out
 
 
 def _venues_payload(chain: Chain) -> list[dict]:
@@ -570,6 +584,46 @@ def _dex(sel: list[Contract], spot: float, chain: Chain, usable: bool) -> dict |
             "contracts": d.contracts, "oi_date": chain.oi_date,
             "caveat": DEX_CAVEAT_CRYPTO if config.is_crypto(chain.ticker) else DEX_CAVEAT,
             "method": DEX_METHOD_CRYPTO if config.is_crypto(chain.ticker) else DEX_METHOD}
+
+
+STRUCTURE_CAVEAT = ("Display only: context for reading the map. VEX and CEX use the same dealer-sign assumption as GEX (dealers long "
+                    "calls, short puts), which open interest cannot confirm. Max pain, the put/call ratio and the points of "
+                    "control read open interest as it stands; the expected move and the 25-delta skew read implied volatility "
+                    "as quoted. None of these is tested against outcomes here.")
+STRUCTURE_METHOD = ("VEX = vanna x 0.01 x OI x multiplier x S: dollars of dealer delta per +1 volatility point. CEX = charm x OI x "
+                    "multiplier x S: dollars of dealer delta lost per calendar day. Both use Black-Scholes with r = q = 0 (crypto: "
+                    "Black-76 on each expiry's forward), the IV and the clock of that contract's GEX. Max pain = the strike "
+                    "where call and put holders together collect least at settlement; no open interest, no answer. Expected "
+                    "move = F x ATM IV x sqrt(T) (1 sigma) on the nearest expiry with a day or more left. 25-delta risk reversal "
+                    "= IV of the 25-delta call minus IV of the 25-delta put on that expiry; negative means puts are richer. "
+                    "Cumulative zero = per-strike net GEX summed from the lowest strike up, zero interpolated: a cruder "
+                    "cross-check of the swept gamma flip.")
+
+
+def _structure(sel: list[Contract], spot: float, chain: Chain, usable: bool) -> dict | None:
+    """Chain structure and second-order exposures of the selected expiries. Never takes the map down: a failure leaves `structure` null."""
+    try:
+        st = ST.compute(sel, spot)
+    except Exception as ex:  # noqa: BLE001
+        log.warning("structure unavailable for %s: %s", chain.ticker, ex)
+        return None
+    em = st.expected_move
+    return {
+        "available": bool(usable and (st.contracts > 0 or st.max_pain)),
+        "vex_net_usd": st.vex_net, "vex_abs_usd": st.vex_abs,
+        "cex_net_usd_day": st.cex_net, "cex_abs_usd_day": st.cex_abs, "contracts": st.contracts,
+        "pcr_oi": None if st.pcr_oi is None else round(st.pcr_oi, 3),
+        "call_oi": st.call_oi, "put_oi": st.put_oi,
+        "gex_poc": st.gex_poc, "oi_poc": st.oi_poc, "cum_zero": None if st.cum_zero is None else round(st.cum_zero, 4),
+        "max_pain": [{"expiry": m.expiry.isoformat(), "strike": m.strike, "distance_pct": m.distance_pct, "oi": m.oi}
+                     for m in st.max_pain],
+        "expected_move": None if em is None else {
+            "expiry": em.expiry.isoformat(), "days": round(em.days, 2), "iv": round(em.iv, 4),
+            "sigma_abs": em.sigma_abs, "sigma_pct": round(em.sigma_pct, 2), "low": em.low, "high": em.high},
+        "rr25": None if st.rr25 is None else round(st.rr25, 4),
+        "rr25_expiry": st.rr25_expiry.isoformat() if st.rr25_expiry else None,
+        "oi_date": chain.oi_date, "caveat": STRUCTURE_CAVEAT, "method": STRUCTURE_METHOD,
+    }
 
 
 VOL_METHOD = ("At-the-money implied volatility of one expiry: the IVs of the two strikes that bracket spot, "
@@ -949,11 +1003,29 @@ def futures_view(ticker: str, override_price: float | None = None, override_basi
                              demo=True)
     now = utc_now()
     cal = get_calendar(now)
-    body, _ = cboe.fetch_raw(index)
-    trade_at = latest = None
+    trade_at = latest = src = None
     if load_credentials() is not None:
         src = AlpacaSource(who="futures")
         trade_at, latest = src.trade_at, src.latest_trade
+    if index in config.ALPACA_INDEX:
+        # Since Cboe's block (2026-11-20): the map's live parity spot plus Alpaca quotes for the AM options that
+        # settle the futures contract. One snapshots request per refresh.
+        if src is None:
+            raise SourceError(f"The {index} Futures view needs Alpaca keys", status=503)
+        chain, _, _ = cached_chain(index)
+        c = futures.front_contract(index, ny_today(now))
+        S = chain.spot.price
+        lo, hi = S * (1 - config.FUTURES_STRIKE_BAND), S * (1 + config.FUTURES_STRIKE_BAND)
+        feed = chain.feed if chain.feed in ("opra", "indicative") else "indicative"
+        status, snaps = src._snapshots_one(config.FUTURES[index]["option_root"], feed,
+                                           c.expiry - timedelta(days=1), c.expiry, lo, hi)
+        if status != 200:
+            raise SourceError(f"{index} quarterly option quotes unavailable (HTTP {status})", status=status)
+        return futures.build(ticker, now=now, cal=cal, market_open=cal.market_open(now),
+                             payload=futures.alpaca_payload(index, chain.spot, snaps),
+                             trade_at=trade_at, latest_trade=latest, override_price=override_price,
+                             override_basis=override_basis)
+    body, _ = cboe.fetch_raw(index)
     return futures.build(ticker, now=now, cal=cal, market_open=cal.market_open(now), index_body=body,
                          trade_at=trade_at, latest_trade=latest, override_price=override_price,
                          override_basis=override_basis)
